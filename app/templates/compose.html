@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Message · Driver Outreach{% endblock %}
+{% block content %}
+<h1>Step 3 of 4: write the message</h1>
+<div class="steps">1. List › <a href="/campaigns/{{ camp.id }}/map">2. Columns</a> › <b>3. Message</b> › 4. Check &amp; start</div>
+
+<div class="two-col">
+<form method="post" class="card" id="compose-form">
+  <label>Subject <input name="subject" id="subject" value="{{ camp.subject }}" maxlength="150" placeholder="CDL-A dry van, $0.65 CPM, home weekly" required></label>
+  <label>Message (plain text)
+    <textarea name="body" id="body" rows="14" required placeholder="Hi {first_name},&#10;&#10;…">{{ camp.body }}</textarea></label>
+  <p class="tip">Tip: drivers answer specific offers — pay (CPM/weekly, or % for owner-operators), home time, lanes, equipment.</p>
+  <p class="muted">Paste your full message (signature, company details, address). The tool adds only one line at the bottom: "Not interested? Reply 'unsubscribe' or click: &lt;link&gt;". No attachments or images.</p>
+  <button class="primary" id="compose-next">Save &amp; preview →</button>
+</form>
+
+<aside class="card">
+  <h2>Content check</h2>
+  <div id="check-out">
+    {% for b in check.blocks %}<div class="alert red">{{ b }}</div>{% endfor %}
+    {% for w in check.warnings %}<div class="alert amber">{{ w }}</div>{% endfor %}
+  </div>
+  <p class="muted" id="word-count">{{ check.words }} words</p>
+  <h2>Placeholders</h2>
+  <ul class="placeholders">
+    {% for k, v in placeholders.items() %}<li><code data-insert="{{ '{' ~ k ~ '}' }}">{{ '{' ~ k ~ '}' }}</code> — {{ v }}</li>{% endfor %}
+  </ul>
+  <p class="muted">Click a placeholder to insert it.</p>
+</aside>
+</div>
+{% endblock %}
+{% block scripts %}<script>initCompose();</script>{% endblock %}

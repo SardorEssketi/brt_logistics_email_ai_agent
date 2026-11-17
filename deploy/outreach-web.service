@@ -1,0 +1,22 @@
+[Unit]
+Description=Driver Outreach - web interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=outreach
+Group=outreach
+WorkingDirectory=/opt/driver-outreach
+EnvironmentFile=/etc/driver-outreach/outreach.env
+ExecStart=/opt/driver-outreach/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/driver-outreach
+MemoryMax=350M
+
+[Install]
+WantedBy=multi-user.target

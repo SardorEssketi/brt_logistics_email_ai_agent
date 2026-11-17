@@ -1,0 +1,39 @@
+# --- Python / tooling
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- Secrets: never commit
+.env
+.env.*
+!.env.example
+secrets/
+*service-account*.json
+google-sa*.json
+*.key
+*.pem
+outreach.env
+duckdns.env
+
+# --- Runtime data: database, uploaded lists, sent-mail copies, backups
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+outbox/
+backups/
+*.eml
+
+# --- Driver lists (real ones must never be committed; tests build their own in temp folders)
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.tsv
+
+# --- Local dry-run output
+dryrun-output/

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Columns · Driver Outreach{% endblock %}
+{% block content %}
+<h1>Step 2 of 4: check the columns</h1>
+<div class="steps">1. List › <b>2. Columns</b> › 3. Message › 4. Check &amp; start</div>
+<p class="muted">List: <b>{{ camp.original_name }}</b></p>
+
+<form method="get" class="card form-row">
+  {% if tabs|length > 1 %}
+  <label>Tab
+    <select name="tab" onchange="this.form.submit()">
+      {% for t in tabs %}<option {% if t == tab %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select></label>
+  {% else %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}
+  <label>Header row
+    <select name="header_row" onchange="this.form.submit()">
+      {% for i in range(1, 11) %}<option value="{{ i }}" {% if i == header_row %}selected{% endif %}>Row {{ i }}{% if i == detected_row %} (detected){% endif %}</option>{% endfor %}
+    </select></label>
+  {% if not detected_row %}<span class="bad-text">No email header found in the first 10 rows — choose the header row and the email column yourself.</span>{% endif %}
+</form>
+
+<form method="post" class="card">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <input type="hidden" name="header_row" value="{{ header_row }}">
+  <h2>What is in each column?</h2>
+  <p class="muted">We filled this in automatically. Please check it. Fields marked <span class="tag red">required</span> must be set.</p>
+  <table class="grid compact">
+    {% for f in fields %}
+    {% set chosen = mapping.get(f) %}
+    {% set needs = (f == 'email' and not chosen) or (f == 'name' and not mapping.get('name') and not mapping.get('first_name')) %}
+    <tr class="{{ 'needs' if needs else '' }}">
+      <td><b>{{ labels[f] }}</b>
+        {% if f == 'email' %}<span class="tag red">required</span>{% endif %}
+        {% if f == 'name' %}<span class="tag">required, or First name</span>{% endif %}
+      </td>
+      <td>
+        <select name="col_{{ f }}">
+          <option value="">{% if needs %}— Please choose —{% else %}— none —{% endif %}</option>
+          {% for i in range(1, width + 1) %}
+          <option value="{{ i }}" {% if chosen == i %}selected{% endif %}>Column {{ col_letter(i) }}: {{ header[i-1] if i <= header|length and header[i-1] else '(empty header)' }}</option>
+          {% endfor %}
+        </select>
+        {% if chosen %}<span class="ok-text">detected</span>{% elif needs %}<span class="bad-text">not found — please choose</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if not mapping.get('notes') %}
+  <p class="amber-text">No NOTES column found. A new <b>NOTES</b> column will be added in column <b>{{ col_letter(notes_new_col) }}</b> (the first completely empty column). No other column is changed.</p>
+  {% endif %}
+  {% if not mapping.get('name') and not mapping.get('first_name') %}
+  <label class="check"><input type="checkbox" name="no_name" value="1"> This list has no names (everyone gets "Hi there")</label>
+  {% endif %}
+  <label class="check"><input type="checkbox" name="skip_sent" value="1" {% if camp.skip_sent %}checked{% endif %}> Skip drivers whose NOTES already say Sent</label>
+
+  <h2>First rows of the list</h2>
+  <div class="scroll">
+  <table class="grid compact sheet">
+    <tr><th></th>{% for i in range(1, width + 1) %}<th>{{ col_letter(i) }}</th>{% endfor %}</tr>
+    <tr class="hdr"><th>{{ header_row }}</th>{% for i in range(1, width + 1) %}<td>{{ header[i-1] if i <= header|length else '' }}</td>{% endfor %}</tr>
+    {% for r in preview %}
+    <tr><th>{{ header_row + loop.index }}</th>{% for i in range(1, width + 1) %}<td>{{ r[i-1] if i <= r|length else '' }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p class="muted">{{ data_rows }} data rows. Checking emails (format + mail server) can take up to a minute for big lists.</p>
+  <button class="primary">Looks right — next →</button>
+</form>
+<form method="post" action="/campaigns/{{ camp.id }}/delete" onsubmit="return confirm('Delete this draft?')"><button class="link danger">Delete draft</button></form>
+{% endblock %}

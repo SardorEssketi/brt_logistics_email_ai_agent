@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Check &amp; start · Driver Outreach{% endblock %}
+{% block content %}
+<h1>Step 4 of 4: check and start</h1>
+<div class="steps">1. List › <a href="/campaigns/{{ camp.id }}/map">2. Columns</a> › <a href="/campaigns/{{ camp.id }}/compose">3. Message</a> › <b>4. Check &amp; start</b></div>
+
+{% for w in check.warnings %}<div class="alert amber">{{ w }}</div>{% endfor %}
+
+<div class="two-col">
+<section class="card">
+  <h2>Summary</h2>
+  <table class="grid compact">
+    <tr><td>Rows in the list</td><td class="num">{{ s.total }}</td></tr>
+    {% for key, n in s.skipped.items() %}
+    <tr><td>Skipped: {{ skip_labels[key] }}</td><td class="num">{{ n }}</td></tr>
+    {% endfor %}
+    <tr class="big"><td><b>Will send</b></td><td class="num"><b>{{ s.will_send }}</b></td></tr>
+    <tr><td>Estimated finish (at current caps)</td><td class="num">{{ s.estimate or '—' }}</td></tr>
+  </table>
+  <p class="muted">Skipped rows get a "Not sent - …" note when you start (rows already marked Sent stay unchanged).</p>
+  <p><a href="/campaigns/{{ camp.id }}/log.csv">Download the full row-by-row list</a></p>
+
+  {% if s.typos %}
+  <h2>Possible typos</h2>
+  <form method="post" action="/campaigns/{{ camp.id }}/fix-typos">
+    <table class="grid compact">
+      {% for t in s.typos %}
+      <tr><td><label class="check"><input type="checkbox" name="fix" value="{{ t.id }}" checked> Row {{ t.row_num }}: {{ t.email }} → <b>{{ t.suggestion }}</b></label></td></tr>
+      {% endfor %}
+    </table>
+    <button>Use the fixed addresses</button>
+    <p class="muted">Not fixed = not sent ("Not sent - invalid email"). The email cell in your list is not changed.</p>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Send a test to yourself</h2>
+  <form id="test-form" class="form-row">
+    <label>Your email <input name="to" type="email" value="{{ test_inbox }}" required></label>
+    <button class="primary" type="submit">Send test to myself</button>
+  </form>
+  <p id="test-out"></p>
+
+  <h2>Start</h2>
+  {% if blockers %}
+    {% for b in blockers %}<div class="alert red">{{ b }}</div>{% endfor %}
+    <button class="primary" disabled>Start sending</button>
+  {% else %}
+  <form method="post" action="/campaigns/{{ camp.id }}/start" onsubmit="return confirm('Start sending to {{ s.will_send }} drivers?')">
+    <button class="primary big">Start sending to {{ s.will_send }} drivers</button>
+  </form>
+  <p class="muted">Sending runs on the server inside the sending window, with 1.5–5 minute gaps. You can close the browser.</p>
+  {% endif %}
+</section>
+</div>
+
+<h2>Preview — 3 random drivers, exactly as they will receive it</h2>
+{% for p in previews %}
+<div class="card email-preview">
+  <div class="hdrs">
+    <div><b>From:</b> {{ sender }}</div>
+    <div><b>To:</b> {{ p.to }} <span class="muted">(row {{ p.row }})</span></div>
+    <div><b>Subject:</b> {{ p.subject }}</div>
+  </div>
+  <pre>{{ p.text }}</pre>
+</div>
+{% else %}
+<p class="muted">Nobody to preview.</p>
+{% endfor %}
+<form method="post" action="/campaigns/{{ camp.id }}/delete" onsubmit="return confirm('Delete this draft?')"><button class="link danger">Delete draft</button></form>
+{% endblock %}
+{% block scripts %}<script>initReview({{ camp.id }});</script>{% endblock %}

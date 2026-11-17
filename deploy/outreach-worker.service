@@ -1,0 +1,23 @@
+[Unit]
+Description=Driver Outreach - background sender, inbox watcher, notes writer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=outreach
+Group=outreach
+WorkingDirectory=/opt/driver-outreach
+EnvironmentFile=/etc/driver-outreach/outreach.env
+ExecStart=/opt/driver-outreach/venv/bin/python -m worker
+Restart=always
+RestartSec=10
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/driver-outreach
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

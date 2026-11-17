@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}New campaign · Driver Outreach{% endblock %}
+{% block content %}
+<h1>New campaign — step 1 of 4: choose the driver list</h1>
+<div class="steps"><b>1. List</b> › 2. Columns › 3. Message › 4. Check &amp; start</div>
+
+<form id="new-form" method="post" action="/campaigns/new" enctype="multipart/form-data" class="card">
+  <label>Campaign name (optional) <input name="name" placeholder="e.g. Dry van OTR – November"></label>
+
+  <h2>Option A: Excel or CSV file</h2>
+  <div id="fsa-box" hidden>
+    <button type="button" id="pick-file" class="primary">Choose Excel/CSV file…</button>
+    <p class="muted">Chrome/Edge: the tool will write the Sent marks back into this same file on your computer.</p>
+  </div>
+  <div id="plain-file">
+    <input type="file" name="file" accept=".xlsx,.xlsm,.csv">
+    <p class="muted">Your browser can't write back to the original file, so you'll get a "Download marked copy" button instead. (Use Chrome or Edge to write into the original.)</p>
+  </div>
+  <p id="picked" class="ok-text"></p>
+
+  <h2>Option B: Google Sheets link</h2>
+  <label>Paste the link from the browser address bar
+    <input name="sheet_url" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+  {% if sa_email %}<p class="muted">The sheet must be shared with <code>{{ sa_email }}</code> as Editor.</p>
+  {% else %}<p class="muted">Google Sheets is not set up yet (README part 4).</p>{% endif %}
+
+  <button class="primary" id="next-btn">Next →</button>
+  <p id="new-error" class="bad-text"></p>
+</form>
+{% endblock %}
+{% block scripts %}<script>initNewCampaign();</script>{% endblock %}

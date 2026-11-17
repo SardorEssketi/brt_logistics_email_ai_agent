@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ camp.name }} · Driver Outreach{% endblock %}
+{% block content %}
+<div class="row-between">
+  <h1>{{ camp.name or ('Campaign ' ~ camp.id) }}</h1>
+  <span class="status" id="st-status">{{ camp.status }}</span>
+</div>
+<div id="st-reason" class="alert amber" hidden></div>
+<div id="st-red"></div>
+<p class="muted" id="st-window"></p>
+
+<div class="counters">
+  <div><span id="c-sent">–</span>Sent</div>
+  <div><span id="c-remaining">–</span>Remaining</div>
+  <div><span id="c-replies">–</span>Replies</div>
+  <div><span id="c-bounces">–</span>Bounces</div>
+  <div><span id="c-unsubs">–</span>Unsubscribes</div>
+  <div><span id="c-errors">–</span>Errors</div>
+</div>
+<p class="muted" id="st-estimate"></p>
+
+<div class="controls">
+  <form method="post" action="/campaigns/{{ camp.id }}/pause" id="f-pause"><button>Pause</button></form>
+  <form method="post" action="/campaigns/{{ camp.id }}/resume" id="f-resume"><button class="primary">Resume</button></form>
+  <form method="post" action="/campaigns/{{ camp.id }}/stop" id="f-stop" onsubmit="return confirm('Stop for good? Drivers not yet emailed will not be emailed by this campaign.')"><button class="danger">Stop</button></form>
+  <a class="button" href="/campaigns/{{ camp.id }}/log.csv">Download log (CSV)</a>
+</div>
+
+<section class="card">
+  <h2>Per account</h2>
+  <table class="grid" id="acc-table">
+    <thead><tr><th>Account</th><th>Sent (this campaign)</th><th>Last 24 h / cap</th><th>Replies</th><th>Bounces</th><th>Unsubs</th><th>Errors</th><th>State</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Notes in the list</h2>
+  <p id="marks-info" class="muted"></p>
+  {% if camp.source_type != 'gsheet' %}
+  <div class="controls">
+    <button id="save-file" class="primary" hidden>Save marks to Excel file</button>
+    <a class="button" href="/campaigns/{{ camp.id }}/download">Download marked copy</a>
+  </div>
+  <p id="save-out"></p>
+  {% else %}
+  <p class="muted">Notes are written into the Google Sheet automatically, in small batches.</p>
+  {% endif %}
+  <div id="unmatched"></div>
+</section>
+
+<section class="card">
+  <h2>Recent alerts</h2>
+  <div id="st-alerts" class="muted">None.</div>
+</section>
+{% endblock %}
+{% block scripts %}<script>initProgress({{ camp.id }}, "{{ camp.source_type }}", {{ camp.original_name|tojson }});</script>{% endblock %}
