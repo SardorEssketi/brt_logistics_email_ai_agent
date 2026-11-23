@@ -9,6 +9,12 @@ from .notes import append_note
 log = logging.getLogger("marks")
 
 
+def list_email(recipient) -> str:
+    """The address as written in the list (used to find the row again). After a typo fix the address we send to
+    differs from the cell, and the cell is not changed, so notes must be matched on the original."""
+    return emails.normalize(recipient["raw_email"]) or (recipient["email"] or "")
+
+
 def queue_mark(conn, campaign_id: int, recipient_id, row_num: int, email: str, note: str) -> None:
     exists = conn.execute(
         "SELECT 1 FROM marks WHERE campaign_id=? AND row_num=? AND note=? AND IFNULL(email,'')=IFNULL(?, '')",

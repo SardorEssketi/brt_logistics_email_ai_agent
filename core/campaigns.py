@@ -3,7 +3,7 @@ import json
 import time
 from datetime import timedelta
 
-from . import caps, columns, db, emails, listio, notes, timeutil
+from . import caps, columns, config, db, emails, listio, notes, timeutil
 from .marks import queue_mark
 from .render import variables
 
@@ -24,6 +24,8 @@ def build_recipients(conn, cid: int, grid, header_row: int, mapping: dict, notes
     """(Re)create the recipient list. Order = sheet order. Nothing is written to the list here."""
     rows = []
     seen = set()
+    recent_days = db.get_setting(conn, "recent_days")
+    dry = config.dry_run()
     for r in range(header_row + 1, len(grid) + 1):
         row = grid[r - 1]
         if not any(str(c).strip() for c in row):
@@ -60,6 +62,8 @@ def build_recipients(conn, cid: int, grid, header_row: int, mapping: dict, notes
                 rec.update(status="skipped", skip_reason=reason)
             elif skip_sent and notes.has_sent(existing_note):
                 rec.update(status="skipped", skip_reason="already_sent")
+            elif db.recently_emailed(conn, email, recent_days, cid, include_dry=dry):
+                rec.update(status="skipped", skip_reason="recent")
         rows.append(rec)
 
     domains = {r["email"].split("@")[1] for r in rows if r["status"] == "queued"}
@@ -93,6 +97,8 @@ def apply_typo_fixes(conn, cid: int, recipient_ids) -> int:
                 conn.execute("UPDATE recipients SET email=?, skip_reason='duplicate' WHERE id=?", (new, rid))
             elif reason:
                 conn.execute("UPDATE recipients SET email=?, skip_reason=? WHERE id=?", (new, reason, rid))
+            elif db.recently_emailed(conn, new, db.get_setting(conn, "recent_days"), cid, include_dry=config.dry_run()):
+                conn.execute("UPDATE recipients SET email=?, skip_reason='recent' WHERE id=?", (new, rid))
             else:
                 conn.execute("UPDATE recipients SET email=?, status='queued', skip_reason=NULL WHERE id=?", (new, rid))
                 taken.add(new)
@@ -149,8 +155,9 @@ def estimate_finish(conn, n: int, now=None):
 
 def queue_skip_marks(conn, cid: int) -> None:
     """When a campaign starts: write 'Not sent - ...' for skipped rows (not for rows already marked Sent)."""
+    recent_days = db.get_setting(conn, "recent_days")
     for r in conn.execute("SELECT * FROM recipients WHERE campaign_id=? AND status='skipped'", (cid,)).fetchall():
-        note = notes.SKIP_NOTES.get(r["skip_reason"])
+        note = notes.skip_note(r["skip_reason"], recent_days)
         if note:
             queue_mark(conn, cid, r["id"], r["row_num"], emails.normalize(r["raw_email"]), note)
 

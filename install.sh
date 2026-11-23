@@ -60,6 +60,9 @@ id outreach >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/
 mkdir -p "$APP_DIR" "$DATA_DIR" "$ETC_DIR"
 chown -R outreach:outreach "$DATA_DIR"
 chmod 750 "$DATA_DIR"
+# Database, lists, sent-mail copies and backups: readable by the app user only
+find "$DATA_DIR" -mindepth 1 -type d -exec chmod 700 {} +
+find "$DATA_DIR" -type f -exec chmod 600 {} +
 chmod 750 "$ETC_DIR"
 chown root:outreach "$ETC_DIR"
 
@@ -134,6 +137,24 @@ for port in 80 443; do
 done
 netfilter-persistent save >/dev/null 2>&1 || true
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then ufw allow 80/tcp; ufw allow 443/tcp; fi
+
+# ---------------------------------------------------------------- 6b. server hardening
+say "Hardening SSH and switching off unused services"
+# Key-only SSH as 'ubuntu'; no root login, no X11. 01- sorts before cloud-init's files, and sshd uses the first value.
+HARDEN=/etc/ssh/sshd_config.d/01-driver-outreach.conf
+printf '%s\n' "# Added by Driver Outreach install.sh" "PermitRootLogin no" "PasswordAuthentication no" \
+  "KbdInteractiveAuthentication no" "X11Forwarding no" > "$HARDEN"
+chmod 644 "$HARDEN"
+if sshd -t 2>/dev/null; then
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+else
+  echo "sshd rejected the hardening file; removing it (SSH unchanged)."; rm -f "$HARDEN"
+fi
+# rpcbind (NFS helper) is not needed: stop it and keep it from starting again
+if systemctl list-unit-files rpcbind.service >/dev/null 2>&1; then
+  systemctl disable --now rpcbind.socket rpcbind.service >/dev/null 2>&1 || true
+  systemctl mask rpcbind.socket rpcbind.service >/dev/null 2>&1 || true
+fi
 
 # ---------------------------------------------------------------- 7. Caddy (HTTPS)
 say "Configuring HTTPS for $DOMAIN"

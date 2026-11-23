@@ -7,8 +7,7 @@ from core import config, crypto
 COOKIE = "outreach_session"
 SESSION_TTL = 12 * 3600
 WINDOW = 15 * 60
-MAX_PER_IP = 5
-MAX_GLOBAL = 50
+MAX_PER_IP = 5   # failed logins per IP per 15 minutes (no global limit: nobody else can lock you out)
 
 
 def make_session(user: str) -> str:
@@ -32,8 +31,7 @@ def too_many_attempts(conn, ip: str) -> bool:
     since = time.time() - WINDOW
     conn.execute("DELETE FROM login_attempts WHERE ts<?", (since,))
     per_ip = conn.execute("SELECT COUNT(*) FROM login_attempts WHERE ip=? AND ts>=?", (ip, since)).fetchone()[0]
-    total = conn.execute("SELECT COUNT(*) FROM login_attempts WHERE ts>=?", (since,)).fetchone()[0]
-    return per_ip >= MAX_PER_IP or total >= MAX_GLOBAL
+    return per_ip >= MAX_PER_IP
 
 
 def record_failure(conn, ip: str) -> None:

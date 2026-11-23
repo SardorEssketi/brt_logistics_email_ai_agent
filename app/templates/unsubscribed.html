@@ -1,18 +1,26 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
 <title>Unsubscribe</title><link rel="stylesheet" href="/static/app.css?v={{ static_v }}"></head>
 <body class="center">
 <div class="card narrow">
-{% if state == 'ok' %}
+{% if state == 'confirm' %}
+  <h1>Unsubscribe?</h1>
+  <p>Click the button and we won't email you again.</p>
+  <form method="post" action="/u/{{ token }}">
+    <input type="hidden" name="confirm" value="1">
+    <button class="primary big" style="width:100%">Confirm unsubscribe</button>
+  </form>
+{% elif state in ('ok', 'already') %}
   <h1>You're unsubscribed</h1>
   <p>You won't get any more emails from us. Sorry for the bother, and drive safe.</p>
 {% elif state == 'test' %}
   <h1>Test email</h1>
-  <p>This link came from a test email, so nothing was changed. In a real email, this link unsubscribes the driver immediately.</p>
+  <p>This link came from a test email, so nothing was changed. In a real email, this page shows a “Confirm unsubscribe” button.</p>
 {% else %}
   <h1>Link not valid</h1>
-  <p>This unsubscribe link is broken or incomplete. Reply to our email with the word "unsubscribe" and we'll remove you.</p>
+  <p>This unsubscribe link is broken or incomplete. Reply to our email with the word “unsubscribe” and we'll remove you.</p>
 {% endif %}
 </div>
 </body>

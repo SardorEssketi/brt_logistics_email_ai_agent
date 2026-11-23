@@ -265,3 +265,26 @@ def test_smtp_error_classification(code, text, kind):
 def test_short_reason():
     assert smtp_send.short_reason("5.1.1 The email account does not exist. Learn more at https://x") == \
         "The email account does not exist."
+
+
+def test_typo_fixed_row_notes_match_the_list_cell(conn):
+    """After a typo fix we send to the fixed address, but the list still has the typo: notes must use the cell."""
+    add_account(conn, "a@gmail.com")
+    cid = setup_campaign(conn, ["kevin@gmail.com"])
+    conn.execute("UPDATE recipients SET raw_email='kevin@gmial.com' WHERE campaign_id=?", (cid,))
+    sent = []
+    drain(make_sender(conn, sent), conn, time.time(), n=3)
+    assert [m["To"].addresses[0].addr_spec for m in sent] == ["kevin@gmail.com"]
+    mark = conn.execute("SELECT email, note FROM marks WHERE campaign_id=?", (cid,)).fetchone()
+    assert mark["email"] == "kevin@gmial.com" and mark["note"].startswith("Sent ")
+
+
+def test_message_build_error_fails_row_instead_of_sticking(conn, monkeypatch):
+    from core import compose
+    add_account(conn, "a@gmail.com")
+    cid = setup_campaign(conn, ["x@gmail.com"])
+    monkeypatch.setattr(compose, "build_message", lambda *a, **k: (_ for _ in ()).throw(ValueError("boom")))
+    sent = []
+    drain(make_sender(conn, sent), conn, time.time(), n=3)
+    r = conn.execute("SELECT status, error FROM recipients WHERE campaign_id=?", (cid,)).fetchone()
+    assert sent == [] and r["status"] == "failed" and "could not build" in r["error"]

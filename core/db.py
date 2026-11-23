@@ -75,7 +75,8 @@ CREATE INDEX IF NOT EXISTS ix_rcpt_email ON recipients(email);
 CREATE INDEX IF NOT EXISTS ix_rcpt_msgid ON recipients(message_id);
 
 CREATE TABLE IF NOT EXISTS send_log(
-  id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, recipient_id INTEGER, ts REAL NOT NULL, kind TEXT
+  id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, recipient_id INTEGER, ts REAL NOT NULL, kind TEXT,
+  dry INTEGER DEFAULT 0                      -- 1 = dry run (saved as a file, not sent): never counts toward real caps
 );
 CREATE INDEX IF NOT EXISTS ix_sendlog ON send_log(account_id, ts);
 
@@ -114,6 +115,7 @@ DEFAULT_SETTINGS = {
     "window": {"days": [0, 1, 2, 3, 4], "start": "09:00", "end": "16:00"},
     "warmup": [20, 40, 60, 80],
     "test_inbox": "",
+    "recent_days": 60,     # don't email a driver the tool emailed (any campaign) in the last N days; 0 = off
 }
 
 
@@ -124,7 +126,19 @@ def connect(path=None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn) -> None:
+    """Add columns that older databases don't have yet."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(send_log)")}
+    if "dry" not in cols:
+        try:
+            conn.execute("ALTER TABLE send_log ADD COLUMN dry INTEGER DEFAULT 0")
+        except sqlite3.OperationalError as e:  # the other process added it first
+            if "duplicate column" not in str(e).lower():
+                raise
 
 
 @contextmanager
@@ -159,6 +173,20 @@ def add_event(conn, level: str, message: str, campaign_id=None, account_id=None)
 def suppression_reason(conn, email: str):
     row = conn.execute("SELECT reason FROM suppression WHERE email=?", (email,)).fetchone()
     return row["reason"] if row else None
+
+
+def recently_emailed(conn, email: str, days, exclude_campaign=None, include_dry=False, now=None) -> bool:
+    """True if another campaign emailed this address in the last `days` days. Dry-run "sends" only count when
+    include_dry (i.e. when checking for a dry-run campaign, so a dry run shows what live sending would do)."""
+    days = int(days or 0)
+    if days <= 0 or not email:
+        return False
+    since = (now or time.time()) - days * 86400
+    row = conn.execute(
+        "SELECT 1 FROM recipients r JOIN campaigns c ON c.id=r.campaign_id WHERE r.email=? AND r.status='sent' "
+        "AND r.sent_at>? AND r.campaign_id<>? AND (c.dry_run=0 OR ?) LIMIT 1",
+        (email, since, exclude_campaign or 0, 1 if include_dry else 0)).fetchone()
+    return row is not None
 
 
 def suppress(conn, email: str, reason: str, note: str = "") -> None:

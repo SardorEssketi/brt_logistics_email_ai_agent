@@ -14,6 +14,7 @@ SKIP_NOTES = {
     "bounced": "Not sent - bounced before",
     "replied": "Not sent - replied before",
     "manual": "Not sent - unsubscribed",
+    "recent": "Not sent - emailed in last {days} days",
     # "already_sent" deliberately absent: those rows stay unchanged.
 }
 
@@ -28,7 +29,14 @@ SKIP_LABELS = {
     "replied": "Replied before (not emailed again automatically)",
     "manual": "On the do-not-email list",
     "already_sent": "NOTES already say Sent",
+    "recent": "Emailed recently by another campaign (see Settings)",
 }
+
+
+def skip_note(reason: str, recent_days=60):
+    """The NOTES text for a skipped row, or None when the row is left unchanged."""
+    note = SKIP_NOTES.get(reason)
+    return note.format(days=recent_days) if note else None
 
 
 def append_note(existing, note: str) -> str:

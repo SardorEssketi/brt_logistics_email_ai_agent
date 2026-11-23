@@ -38,8 +38,16 @@ def normalize(raw) -> str:
     """Extract the first email-looking token and lowercase it. '' if none."""
     if raw is None:
         return ""
-    m = FIND_RE.search(str(raw).strip())
-    return m.group(0).lower().strip(".'-") if m else ""
+    s = str(raw).strip()
+    m = FIND_RE.search(s)
+    if not m:
+        return ""
+    # "tasha reed@gmail.com": the address continues to the left of a space, so the cell is broken.
+    # Taking only "reed@gmail.com" would email a different person, so treat the cell as invalid instead.
+    before = s[:m.start()]
+    if before[-1:].isspace() and re.search(r"[A-Za-z0-9._%+'\-]$", before.rstrip()):
+        return ""
+    return m.group(0).lower().strip(".'-")
 
 
 def is_valid_syntax(email: str) -> bool:

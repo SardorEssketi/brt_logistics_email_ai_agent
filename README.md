@@ -152,7 +152,10 @@ Open your `https://…duckdns.org` address and log in. Then in **Settings**:
 1. **Gmail accounts**: add 2–3 (step 6), each with its sender name.
 2. **Sending window**: default Mon–Fri 9:00–16:00 Central. The matching Tashkent time is shown underneath.
 3. **Daily caps**: default warm-up is 20 → 40 → 60 → 80 per account per day (weeks 1, 2, 3, 4+), counted over a rolling 24 hours. Keep them. Above 100/day a free Gmail is likely to be locked.
-4. **"Send test to myself" address**: your own inbox.
+4. **Repeat emails**: default 60 days. A driver that any campaign emailed in that time is skipped, even on a new list, and the row gets "Not sent - emailed in last 60 days". 0 turns the check off. Dry runs never count.
+5. **"Send test to myself" address**: your own inbox.
+
+Dry runs (`DRY_RUN=1`) never use up an account's real daily cap. The unsubscribe link in each email opens a page with a **Confirm unsubscribe** button (so mail scanners that open links don't unsubscribe anyone); Gmail's own one-click unsubscribe works directly.
 
 ## 9. Sending a campaign
 

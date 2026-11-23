@@ -18,10 +18,12 @@ def account_cap(acc, schedule, now=None) -> int:
     return max(0, min(int(cap), HARD_MAX))
 
 
-def sent_last_24h(conn, account_id: int, now=None) -> int:
+def sent_last_24h(conn, account_id: int, now=None, dry=False) -> int:
+    """Emails this account sent in the last 24 h. Real sends and dry-run "sends" are counted separately:
+    dry runs never use up the real daily cap (dry=True gives the dry-run count, used to pace dry runs)."""
     now = now or time.time()
-    return conn.execute("SELECT COUNT(*) FROM send_log WHERE account_id=? AND ts>?",
-                        (account_id, now - DAY)).fetchone()[0]
+    return conn.execute("SELECT COUNT(*) FROM send_log WHERE account_id=? AND ts>? AND IFNULL(dry,0)=?",
+                        (account_id, now - DAY, 1 if dry else 0)).fetchone()[0]
 
 
 def account_state(acc, now=None) -> str:

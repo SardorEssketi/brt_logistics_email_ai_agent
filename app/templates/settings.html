@@ -4,7 +4,7 @@
 <h1>Settings</h1>
 <nav class="settings-nav" aria-label="Settings sections">
   <a href="#accounts">Gmail accounts</a><a href="#window">Sending window</a><a href="#caps">Daily caps</a>
-  <a href="#test-inbox">Test address</a><a href="#suppression">Do-not-email list</a><a href="#sheets">Google Sheets</a>
+  <a href="#repeat">Repeat emails</a><a href="#test-inbox">Test address</a><a href="#suppression">Do-not-email list</a><a href="#sheets">Google Sheets</a>
 </nav>
 
 <section class="card" id="accounts">
@@ -102,6 +102,16 @@
     {% endif %}
     <div class="cap-warning alert red" data-risky="{{ risky }}" hidden>A cap above {{ risky }} a day is a high risk of account lock on a free Gmail.</div>
     <button class="primary" style="margin-top:12px">Save caps</button>
+  </form>
+</section>
+
+<section class="card" id="repeat">
+  <h2>Repeat emails</h2>
+  <p class="muted">Skip drivers that any campaign emailed in the last few days, even if they're on a new list. Their row gets the note “Not sent - emailed in last {{ recent_days or 'N' }} days”. Dry runs never block live sending.</p>
+  <form method="post" action="/settings/recent-days" class="form-row">
+    <label style="flex:0 1 220px">Days <span class="hint">0 turns the check off.</span>
+      <input type="number" name="recent_days" min="0" max="365" value="{{ recent_days }}" required></label>
+    <button>Save days</button>
   </form>
 </section>
 

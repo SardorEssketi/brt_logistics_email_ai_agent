@@ -175,6 +175,7 @@ def settings_page(request: Request):
     now = time.time()
     return page(request, "settings.html", accounts=account_rows(c, now), window=window, tashkent=timeutil.tashkent_range(window, now), warmup=db.get_setting(c, "warmup"),
                 test_inbox=db.get_setting(c, "test_inbox"), day_names=timeutil.DAY_NAMES,
+                recent_days=db.get_setting(c, "recent_days"),
                 suppressed=c.execute("SELECT reason, COUNT(*) n FROM suppression GROUP BY reason").fetchall(),
                 sa_email=listio.service_account_email(), hard_max=caps.HARD_MAX, risky=caps.RISKY_ABOVE)
 
@@ -305,6 +306,17 @@ async def caps_save(request: Request):
         return redirect("/settings", err=f"Saved — but a cap above {caps.RISKY_ABOVE}/day is a high risk of the free "
                                          "Gmail account being locked.")
     return redirect("/settings", msg="Daily caps saved.")
+
+
+@app.post("/settings/recent-days")
+def recent_days_save(recent_days: str = Form("")):
+    v = recent_days.strip()
+    if not v.isdigit() or not 0 <= int(v) <= 365:
+        return redirect("/settings#repeat", err="Enter a number of days from 0 to 365 (0 turns the check off).")
+    db.set_setting(conn(), "recent_days", int(v))
+    msg = (f"Saved: drivers emailed by any campaign in the last {int(v)} days are skipped." if int(v)
+           else "Saved: the repeat-email check is off.")
+    return redirect("/settings#repeat", msg=msg)
 
 
 @app.post("/settings/test-inbox")
@@ -576,9 +588,10 @@ def test_send(cid: int, to: str = Form("")):
         return JSONResponse({"ok": False, "message": " ".join(blocks)})
     now = time.time()
     schedule = db.get_setting(c, "warmup")
+    dry = config.dry_run()
     acc = next((a for a in c.execute("SELECT * FROM accounts ORDER BY id")
                 if caps.account_state(a, now) == "ok"
-                and caps.sent_last_24h(c, a["id"], now) < caps.account_cap(a, schedule, now)), None)
+                and caps.sent_last_24h(c, a["id"], now, dry=dry) < caps.account_cap(a, schedule, now)), None)
     if acc is None:
         return JSONResponse({"ok": False, "message": "No Gmail account is available: add one, give it a sender "
                                                      "name, or wait until one is under its daily cap."})
@@ -599,7 +612,8 @@ def test_send(cid: int, to: str = Form("")):
             info = f"Sent from {acc['email']} to {to}. Check your Inbox (and Spam, just in case)."
     except smtp_send.SendError as e:
         return JSONResponse({"ok": False, "message": f"Gmail refused: {smtp_send.short_reason(e.message)}"})
-    c.execute("INSERT INTO send_log(account_id,recipient_id,ts,kind) VALUES(?,?,?,'test')", (acc["id"], None, now))
+    c.execute("INSERT INTO send_log(account_id,recipient_id,ts,kind,dry) VALUES(?,?,?,'test',?)",
+              (acc["id"], None, now, 1 if dry else 0))
     db.set_setting(c, "test_inbox", to)
     return {"ok": True, "message": info}
 
@@ -751,6 +765,8 @@ def _marked_name(camp) -> str:
 def download_marked(cid: int):
     c = conn()
     camp_row = c.execute("SELECT * FROM campaigns WHERE id=?", (cid,)).fetchone()
+    if camp_row is None:
+        raise LookupError
     if camp_row["source_type"] == "gsheet":
         return redirect(f"/campaigns/{cid}", err="This campaign uses a Google Sheet; notes are written there directly.")
     try:
@@ -769,6 +785,8 @@ def download_marked(cid: int):
 async def mark_file(cid: int, file: UploadFile = File(...)):
     c = conn()
     camp_row = c.execute("SELECT * FROM campaigns WHERE id=?", (cid,)).fetchone()
+    if camp_row is None:
+        raise LookupError
     data = await file.read()
     if len(data) > MAX_UPLOAD:
         return JSONResponse({"error": "File too big."}, status_code=400)
@@ -780,28 +798,47 @@ async def mark_file(cid: int, file: UploadFile = File(...)):
 
 
 # ------------------------------------------------------------------ public unsubscribe
-def _unsub(token: str):
+def _unsub_lookup(c, token: str):
+    """('test'|'invalid'|'valid', recipient row or None). Changes nothing."""
     rid = crypto.parse_unsub_token(token)
     if rid is None:
-        return "invalid"
+        return "invalid", None
     if rid == 0:
-        return "test"
-    c = conn()
+        return "test", None
     r = c.execute("SELECT * FROM recipients WHERE id=?", (rid,)).fetchone()
     if r is None or not crypto.verify_unsub_token(token, r["email"] or ""):
-        return "invalid"
+        return "invalid", None
+    return "valid", r
+
+
+def _unsub(token: str):
+    c = conn()
+    state, r = _unsub_lookup(c, token)
+    if state != "valid":
+        return state
     outcomes.record(c, "unsubscribed", r if r["status"] == "sent" else None, r["email"])
     return "ok"
 
 
 @app.get("/u/{token}", response_class=HTMLResponse)
 def unsub_get(request: Request, token: str):
-    return templates.TemplateResponse(request, "unsubscribed.html", {"state": _unsub(token)})
+    """Opening the link only shows a Confirm button: mail scanners that open every link don't unsubscribe anyone."""
+    c = conn()
+    state, r = _unsub_lookup(c, token)
+    if state == "valid":
+        state = "already" if db.suppression_reason(c, r["email"]) in ("unsubscribed", "manual") else "confirm"
+    return templates.TemplateResponse(request, "unsubscribed.html", {"state": state, "token": token})
 
 
 @app.post("/u/{token}")
-def unsub_post(token: str):
+async def unsub_post(request: Request, token: str):
+    """Our Confirm button (form field confirm=1) gets a page; Gmail's one-click POST
+    (List-Unsubscribe=One-Click, RFC 8058) gets a plain 200, exactly as before."""
+    form = await request.form()
     state = _unsub(token)
+    if form.get("confirm"):
+        return templates.TemplateResponse(request, "unsubscribed.html", {"state": state, "token": token},
+                                          status_code=200 if state in ("ok", "test") else 400)
     return PlainTextResponse("Unsubscribed" if state in ("ok", "test") else "Invalid link",
                              status_code=200 if state in ("ok", "test") else 400)
 

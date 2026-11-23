@@ -2,7 +2,7 @@
 import time
 
 from . import db
-from .marks import queue_mark
+from .marks import list_email, queue_mark
 from .timeutil import us_date
 
 BOUNCE_LIMIT, BOUNCE_MIN = 0.03, 30
@@ -35,7 +35,7 @@ def record(conn, kind: str, recipient, email: str = None, ts=None) -> bool:
             fresh = conn.execute(f"SELECT {col} FROM recipients WHERE id=?", (recipient["id"],)).fetchone()
             if fresh[0] is None:
                 conn.execute(f"UPDATE recipients SET {col}=? WHERE id=?", (ts, recipient["id"]))
-                queue_mark(conn, recipient["campaign_id"], recipient["id"], recipient["row_num"], email,
+                queue_mark(conn, recipient["campaign_id"], recipient["id"], recipient["row_num"], list_email(recipient),
                            f"{label} {us_date(ts)}")
     if recipient is not None:
         check_auto_pause(conn, recipient["campaign_id"])

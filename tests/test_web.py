@@ -105,9 +105,12 @@ def test_full_flow_xlsx(client, conn, tmp_path):
     rid = conn.execute("SELECT id, email FROM recipients WHERE campaign_id=? AND row_num=2", (cid,)).fetchone()
     token = crypto.make_unsub_token(rid["id"], rid["email"])
     anon = TestClient(client.app)
-    r = anon.get(f"/u/{token}")
-    assert "You're unsubscribed" in r.text
+    r = anon.get(f"/u/{token}")                                # opening the link changes nothing
+    assert "Confirm unsubscribe" in r.text and db.suppression_reason(conn, rid["email"]) is None
+    r = anon.post(f"/u/{token}", data={"confirm": "1"})         # the button
+    assert r.status_code == 200 and "You're unsubscribed" in r.text
     assert db.suppression_reason(conn, rid["email"]) == "unsubscribed"
+    assert "You're unsubscribed" in anon.get(f"/u/{token}").text  # opening it again
     assert anon.post(f"/u/{token}").status_code == 200       # one-click POST, idempotent
     assert anon.get("/u/1.forged").status_code == 200 and "not valid" in anon.get("/u/1.forged").text
     assert "test email" in anon.get(f"/u/{crypto.make_unsub_token(0, 'me@example.com')}").text
@@ -152,3 +155,9 @@ def test_settings_pages(client, conn):
     assert "No sender name" in client.get("/settings").text
     client.post(f"/settings/accounts/{aid}/name", data={"display_name": "Mike - ABC Logistics"})
     assert conn.execute("SELECT display_name FROM accounts WHERE id=?", (aid,)).fetchone()[0] == "Mike - ABC Logistics"
+
+
+def test_missing_campaign_download_is_404(client):
+    login(client)
+    assert client.get("/campaigns/999/download").status_code == 404
+    assert client.post("/api/campaigns/999/mark-file", files={"file": ("x.xlsx", b"x")}).status_code == 404

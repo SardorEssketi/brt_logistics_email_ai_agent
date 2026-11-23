@@ -167,3 +167,14 @@ def test_window_and_dates():
     assert timeutil.tashkent_range(w, wed_10) == "20:00–03:00"       # CST: +11 h
     july = datetime(2026, 7, 15, 10, 0, tzinfo=timeutil.CENTRAL).timestamp()
     assert timeutil.tashkent_range(w, july) == "19:00–02:00"         # CDT: +10 h
+
+
+def test_normalize_never_guesses_part_of_a_broken_address():
+    # "tasha reed@gmail.com" must not become "reed@gmail.com" (a different person)
+    assert emails.normalize("tasha reed.e2e@gmail.com") == ""
+    assert emails.normalize("John Smith john@gmail.com") == ""
+    # labelled / bracketed / linked cells still work
+    assert emails.normalize("Email: a@b.com") == "a@b.com"
+    assert emails.normalize("John Smith <john@gmail.com>") == "john@gmail.com"
+    assert emails.normalize("<curtis@gmail.com>") == "curtis@gmail.com"
+    assert emails.normalize("  JAMAL@GMAIL.COM ") == "jamal@gmail.com"

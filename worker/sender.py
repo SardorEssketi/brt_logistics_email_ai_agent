@@ -12,8 +12,8 @@ import time
 from pathlib import Path
 
 from core import caps, compose, config, crypto, db, imap_util, outcomes, smtp_send, timeutil
-from core.marks import queue_mark
-from core.notes import error_note
+from core.marks import list_email, queue_mark
+from core.notes import error_note, skip_note
 
 log = logging.getLogger("sender")
 
@@ -91,12 +91,12 @@ class Sender:
 
     def _mark_sent(self, row, account_id, ts):
         self.conn.execute("UPDATE recipients SET status='sent', sent_at=?, error=NULL WHERE id=?", (ts, row["id"]))
-        self.conn.execute("INSERT INTO send_log(account_id,recipient_id,ts,kind) VALUES(?,?,?,'campaign')",
-                          (account_id, row["id"], ts))
-        queue_mark(self.conn, row["campaign_id"], row["id"], row["row_num"], row["email"], f"Sent {timeutil.us_date(ts)}")
+        self.conn.execute("INSERT INTO send_log(account_id,recipient_id,ts,kind,dry) VALUES(?,?,?,'campaign',?)",
+                          (account_id, row["id"], ts, 1 if self._is_dry(row["campaign_id"]) else 0))
+        queue_mark(self.conn, row["campaign_id"], row["id"], row["row_num"], list_email(row), f"Sent {timeutil.us_date(ts)}")
 
     # ------------------------------------------------------------ main step
-    def usable_accounts(self, now):
+    def usable_accounts(self, now, dry=False):
         schedule = db.get_setting(self.conn, "warmup")
         out = []
         for acc in self.conn.execute("SELECT * FROM accounts ORDER BY id").fetchall():
@@ -104,7 +104,7 @@ class Sender:
                 continue
             if (acc["next_send_at"] or 0) > now:
                 continue
-            if caps.sent_last_24h(self.conn, acc["id"], now) >= caps.account_cap(acc, schedule, now):
+            if caps.sent_last_24h(self.conn, acc["id"], now, dry=dry) >= caps.account_cap(acc, schedule, now):
                 continue
             out.append(acc)
         # Rotate: the account that sent least recently goes first.
@@ -112,23 +112,37 @@ class Sender:
         out.sort(key=lambda a: (last.get(a["id"], 0), a["id"]))
         return out
 
-    def claim_next(self, acc, now):
-        """Atomically pick the next queued row (sheet order) and mark it 'sending'."""
+    def modes_waiting(self, now):
+        """Modes with rows waiting, oldest campaign first: [False] live, [True] dry run, or both.
+        Caps are counted per mode, so a dry run that hit its cap never holds up live sending (and vice versa)."""
+        rows = self.conn.execute(
+            """SELECT c.dry_run, MIN(c.id) first FROM recipients r JOIN campaigns c ON c.id=r.campaign_id
+               WHERE c.status='running' AND r.status='queued' AND r.next_attempt_at<=?
+               GROUP BY c.dry_run ORDER BY first""", (now,)).fetchall()
+        return [bool(r[0]) for r in rows]
+
+    def claim_next(self, acc, now, dry=None):
+        """Atomically pick the next queued row (sheet order) and mark it 'sending'.
+        dry=True/False limits the pick to dry-run / live campaigns (caps are counted per mode)."""
+        mode = "" if dry is None else f" AND c.dry_run={1 if dry else 0}"
+        recent_days = db.get_setting(self.conn, "recent_days")
         while True:
             with db.tx(self.conn):
                 row = self.conn.execute(
-                    """SELECT r.* FROM recipients r JOIN campaigns c ON c.id=r.campaign_id
-                       WHERE c.status='running' AND r.status='queued' AND r.next_attempt_at<=?
+                    f"""SELECT r.*, c.dry_run AS camp_dry FROM recipients r JOIN campaigns c ON c.id=r.campaign_id
+                       WHERE c.status='running' AND r.status='queued' AND r.next_attempt_at<=?{mode}
                        ORDER BY c.id, r.row_num LIMIT 1""", (now,)).fetchone()
                 if row is None:
                     return None
                 reason = db.suppression_reason(self.conn, row["email"])
-                if reason:  # unsubscribed / bounced / replied since the campaign was prepared
-                    from core.notes import SKIP_NOTES
+                if not reason and db.recently_emailed(self.conn, row["email"], recent_days, row["campaign_id"],
+                                                      include_dry=bool(row["camp_dry"]), now=now):
+                    reason = "recent"  # another campaign emailed this driver within the last N days
+                if reason:  # unsubscribed / bounced / replied / recently emailed since the campaign was prepared
                     self.conn.execute("UPDATE recipients SET status='skipped', skip_reason=? WHERE id=?",
                                       (reason, row["id"]))
-                    queue_mark(self.conn, row["campaign_id"], row["id"], row["row_num"], row["email"],
-                               SKIP_NOTES.get(reason, "Not sent - unsubscribed"))
+                    queue_mark(self.conn, row["campaign_id"], row["id"], row["row_num"], list_email(row),
+                               skip_note(reason, recent_days) or "Not sent - unsubscribed")
                     continue
                 mid = compose.new_message_id()
                 self.conn.execute("UPDATE recipients SET status='sending', account_id=?, message_id=?, sending_at=?, "
@@ -143,12 +157,13 @@ class Sender:
         window = db.get_setting(self.conn, "window")
         if not config.dry_run_fast() and not timeutil.in_window(now, window):
             return False
-        for acc in self.usable_accounts(now):   # accounts without a sender name are excluded here
-            row = self.claim_next(acc, now)
-            if row is None:
-                return False
-            self.send_one(acc, row, now)
-            return True
+        for dry in self.modes_waiting(now):
+            for acc in self.usable_accounts(now, dry=dry):   # accounts without a sender name are excluded here
+                row = self.claim_next(acc, now, dry=dry)
+                if row is None:
+                    break                                    # everything left in this mode was skipped
+                self.send_one(acc, row, now)
+                return True
         return False
 
     def send_one(self, acc, row, now):
@@ -156,8 +171,13 @@ class Sender:
         vars_ = {"first_name": row["first_name"], "last_name": row["last_name"], "name": row["name"],
                  "position": row["position"]}
         unsub = compose.unsub_url(row["id"], row["email"])
-        msg = compose.build_message(acc["email"], acc["display_name"], row["email"], row["name"], c["subject"],
-                                    c["body"], vars_, unsub, row["message_id"])
+        try:
+            msg = compose.build_message(acc["email"], acc["display_name"], row["email"], row["name"], c["subject"],
+                                        c["body"], vars_, unsub, row["message_id"])
+        except Exception as e:  # nothing was sent: don't leave the row stuck in 'sending'
+            log.exception("Could not build the email for row %s", row["id"])
+            self.handle_error(acc, row, smtp_send.SendError("permanent", f"could not build the email ({e})"), now)
+            return
         try:
             if c["dry_run"]:
                 p = self._eml_path(row)
@@ -210,7 +230,7 @@ class Sender:
                 self.conn.execute("UPDATE accounts SET next_send_at=? WHERE id=?", (now + self._gap(), acc["id"]))
             else:
                 self.conn.execute("UPDATE recipients SET status='failed', error=? WHERE id=?", (reason, row["id"]))
-                queue_mark(self.conn, row["campaign_id"], row["id"], row["row_num"], row["email"], error_note(reason))
+                queue_mark(self.conn, row["campaign_id"], row["id"], row["row_num"], list_email(row), error_note(reason))
                 self.conn.execute("UPDATE accounts SET next_send_at=? WHERE id=?", (now + self._gap(), acc["id"]))
 
     def finish_done_campaigns(self):
