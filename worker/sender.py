@@ -217,6 +217,22 @@ class Sender:
                 db.add_event(self.conn, "error", f"{acc['email']} was STOPPED: Gmail refused the login or flagged the "
                              f"account ({reason}). Sign in to this Gmail in a browser, fix any warning, create a new App "
                              f"Password, then re-enable it in Settings.", account_id=acc["id"])
+            elif kind == "login_dropped":
+                # Gmail hung up at login: usually a revoked/wrong App Password. Nothing was sent.
+                self.conn.execute(requeue, (now, row["id"]))
+                if (acc["last_error"] or "").startswith("login_dropped"):   # twice in a row -> stop for good
+                    self.conn.execute("UPDATE accounts SET disabled_reason=? WHERE id=?",
+                                      ("Gmail did not accept the App Password", acc["id"]))
+                    db.add_event(self.conn, "error", f"{acc['email']} was STOPPED: Gmail refused its login twice in a "
+                                 "row (the App Password is not accepted). Create a new App Password for this Gmail "
+                                 "and paste it under New App Password in Settings, then re-enable it.",
+                                 account_id=acc["id"])
+                else:                                                         # first time -> rest 1 hour
+                    self.conn.execute("UPDATE accounts SET paused_until=? WHERE id=?", (now + 3600, acc["id"]))
+                    db.add_event(self.conn, "warn", f"Gmail closed the connection when {acc['email']} logged in. "
+                                 "It rests for 1 hour, then tries again; if that fails too it is stopped. If you "
+                                 "changed this Gmail's password, create a new App Password in Settings.",
+                                 account_id=acc["id"])
             elif kind == "network":
                 self.conn.execute(requeue, (now + 300, row["id"]))
                 self.conn.execute("UPDATE accounts SET next_send_at=? WHERE id=?", (now + 300, acc["id"]))

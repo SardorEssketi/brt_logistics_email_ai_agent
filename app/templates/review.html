@@ -37,6 +37,7 @@
     <label>Your email <input name="to" type="email" value="{{ test_inbox }}" required></label>
     <button type="submit">Send test</button>
   </form>
+  <p class="muted small-text">This email is really sent{% if dry_run %}, also in dry run{% endif %}, only to the address above, from one of your Gmail accounts. It counts toward that account's daily cap.</p>
   <p id="test-out" role="status"></p>
 
   <h2>Start</h2>

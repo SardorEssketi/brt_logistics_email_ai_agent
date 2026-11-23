@@ -138,15 +138,41 @@ def test_dry_run_sends_do_not_use_up_the_real_cap(conn, tmp_path):
     assert caps.sent_last_24h(conn, acc, now + 200) == 1
 
 
-def test_dry_run_test_send_does_not_use_up_the_real_cap(client, conn, monkeypatch):
+def _draft(conn):
+    cid = conn.execute("INSERT INTO campaigns(name,created_at,status,source_type,source_ref,subject,body) "
+                       "VALUES('t',?,'draft','csv','x','Hi','Hello {first_name}, $0.65 CPM')", (time.time(),)).lastrowid
+    conn.execute("INSERT INTO recipients(campaign_id,row_num,email,raw_email,name,first_name,status) "
+                 "VALUES(?,2,'driver@gmail.com','driver@gmail.com','Joe Driver','Joe','queued')", (cid,))
+    return cid
+
+
+def test_test_send_is_really_sent_even_in_dry_run(client, conn, monkeypatch):
+    from core import smtp_send
     monkeypatch.setenv("DRY_RUN", "1")
     acc = add_account(conn, "a@gmail.com")
     login(client)
-    cid = conn.execute("INSERT INTO campaigns(name,created_at,status,source_type,source_ref,subject,body) "
-                       "VALUES('t',?,'draft','csv','x','Hi','Hello {first_name}, $0.65 CPM')", (time.time(),)).lastrowid
-    r = client.post(f"/api/campaigns/{cid}/test-send", data={"to": "me@example.com"})
-    assert r.json()["ok"], r.json()
-    assert caps.sent_last_24h(conn, acc) == 0 and caps.sent_last_24h(conn, acc, dry=True) == 1
+    cid = _draft(conn)
+    mails = []
+    monkeypatch.setattr(smtp_send, "send", lambda acc_email, pw, msg, **k: mails.append(msg))
+    r = client.post(f"/api/campaigns/{cid}/test-send", data={"to": "me@example.com"}).json()
+    assert r["ok"] and "Sent from a@gmail.com to me@example.com" in r["message"]
+    assert len(mails) == 1 and mails[0]["To"] == "me@example.com"           # only to the typed address
+    assert "Hello Joe" in mails[0].get_body(("plain",)).get_content()        # personalised with a real row
+    assert caps.sent_last_24h(conn, acc) == 1                                 # a real email: real cap
+    # the campaign itself is untouched: the driver was not emailed
+    assert conn.execute("SELECT status FROM recipients WHERE campaign_id=?", (cid,)).fetchone()[0] == "queued"
+
+
+def test_test_send_with_rejected_app_password_says_so(client, conn, monkeypatch):
+    from core import smtp_send
+    add_account(conn, "a@gmail.com")
+    login(client)
+    cid = _draft(conn)
+    def refuse(*a, **k):
+        raise smtp_send.SendError("login_dropped", "Gmail closed the connection at login")
+    monkeypatch.setattr(smtp_send, "send", refuse)
+    r = client.post(f"/api/campaigns/{cid}/test-send", data={"to": "me@example.com"}).json()
+    assert not r["ok"] and "did not accept the App Password" in r["message"]
 
 
 def test_old_database_gets_the_dry_column(tmp_path):
@@ -214,3 +240,57 @@ def test_one_ip_is_locked_after_5_failures(conn):
     auth.record_failure(conn, "1.2.3.4")
     assert auth.too_many_attempts(conn, "1.2.3.4")
     assert not auth.too_many_attempts(conn, "5.6.7.8")
+
+
+# ---------------------------------------------------------------- Gmail hanging up at login
+def test_hangup_at_login_is_its_own_error_kind():
+    import smtplib
+    from core import smtp_send
+    from tests.conftest import FakeSMTP
+    msg = __import__("email.message", fromlist=["EmailMessage"]).EmailMessage()
+    with pytest.raises(smtp_send.SendError) as e:
+        smtp_send.send("a@gmail.com", "pw", msg, smtp_factory=lambda: FakeSMTP(
+            [], login_error=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")))
+    assert e.value.kind == "login_dropped"
+
+
+def test_hangup_at_login_rests_1h_then_stops_the_account(conn):
+    import smtplib
+    acc = add_account(conn, "a@gmail.com")
+    cid = setup_campaign(conn, ["d1@gmail.com"])
+    sent = []
+    s = make_sender(conn, sent, login_error=smtplib.SMTPServerDisconnected("Connection unexpectedly closed"))
+    now = time.time()
+    s.tick(now)                                                    # 1st hang-up
+    a = conn.execute("SELECT * FROM accounts WHERE id=?", (acc,)).fetchone()
+    assert caps.account_state(a, now + 60) == "paused" and a["paused_until"] == pytest.approx(now + 3600)
+    assert a["disabled_reason"] is None
+    r = conn.execute("SELECT status, message_id FROM recipients WHERE campaign_id=?", (cid,)).fetchone()
+    assert r["status"] == "queued" and r["message_id"] is None    # nothing sent, nothing lost
+    assert conn.execute("SELECT level FROM events WHERE account_id=?", (acc,)).fetchone()[0] == "warn"
+    for t in (now + 60, now + 1800):                               # resting: no more login attempts
+        conn.execute("UPDATE accounts SET next_send_at=0")
+        assert s.tick(t) is False
+    conn.execute("UPDATE accounts SET next_send_at=0")
+    s.tick(now + 3700)                                             # 2nd hang-up in a row
+    a = conn.execute("SELECT * FROM accounts WHERE id=?", (acc,)).fetchone()
+    assert caps.account_state(a) == "disabled" and "App Password" in a["disabled_reason"]
+    assert sent == []
+    assert conn.execute("SELECT status FROM recipients WHERE campaign_id=?", (cid,)).fetchone()[0] == "queued"
+
+
+def test_a_successful_send_resets_the_hangup_count(conn):
+    import smtplib
+    acc = add_account(conn, "a@gmail.com")
+    setup_campaign(conn, ["d1@gmail.com", "d2@gmail.com", "d3@gmail.com"])
+    now = time.time()
+    bad = make_sender(conn, [], login_error=smtplib.SMTPServerDisconnected("closed"))
+    bad.tick(now)                                                  # hang-up: rest 1 h
+    good_sent = []
+    good = make_sender(conn, good_sent)
+    conn.execute("UPDATE accounts SET next_send_at=0")
+    good.tick(now + 3700)                                          # works again: clears the count
+    conn.execute("UPDATE accounts SET next_send_at=0, paused_until=NULL")
+    bad.tick(now + 3800)                                           # a single new hang-up only rests again
+    a = conn.execute("SELECT * FROM accounts WHERE id=?", (acc,)).fetchone()
+    assert len(good_sent) == 1 and a["disabled_reason"] is None and a["paused_until"] > now + 3800

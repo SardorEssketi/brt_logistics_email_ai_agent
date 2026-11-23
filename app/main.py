@@ -588,10 +588,11 @@ def test_send(cid: int, to: str = Form("")):
         return JSONResponse({"ok": False, "message": " ".join(blocks)})
     now = time.time()
     schedule = db.get_setting(c, "warmup")
-    dry = config.dry_run()
+    # A test email is always really sent (also in dry run): it goes only to the one address typed in the box,
+    # so you can see the real email in your own inbox. It counts toward the account's real daily cap.
     acc = next((a for a in c.execute("SELECT * FROM accounts ORDER BY id")
                 if caps.account_state(a, now) == "ok"
-                and caps.sent_last_24h(c, a["id"], now, dry=dry) < caps.account_cap(a, schedule, now)), None)
+                and caps.sent_last_24h(c, a["id"], now) < caps.account_cap(a, schedule, now)), None)
     if acc is None:
         return JSONResponse({"ok": False, "message": "No Gmail account is available: add one, give it a sender "
                                                      "name, or wait until one is under its daily cap."})
@@ -602,18 +603,17 @@ def test_send(cid: int, to: str = Form("")):
     msg = compose.build_message(acc["email"], acc["display_name"], to, "", camp["subject"], camp["body"], vars_,
                                 unsub, compose.new_message_id())
     try:
-        if config.dry_run():
-            p = config.data_dir() / "outbox" / "tests" / f"test-{int(now)}.eml"
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(bytes(msg))
-            info = f"DRY RUN: saved to {p} instead of sending."
-        else:
-            smtp_send.send(acc["email"], crypto.decrypt(acc["password_enc"]), msg)
-            info = f"Sent from {acc['email']} to {to}. Check your Inbox (and Spam, just in case)."
+        smtp_send.send(acc["email"], crypto.decrypt(acc["password_enc"]), msg)
     except smtp_send.SendError as e:
+        if e.kind in ("auth", "login_dropped"):
+            return JSONResponse({"ok": False, "message": f"Gmail did not accept the App Password of {acc['email']}. "
+                                 "Create a new one and save it under New App Password in Settings."})
         return JSONResponse({"ok": False, "message": f"Gmail refused: {smtp_send.short_reason(e.message)}"})
-    c.execute("INSERT INTO send_log(account_id,recipient_id,ts,kind,dry) VALUES(?,?,?,'test',?)",
-              (acc["id"], None, now, 1 if dry else 0))
+    info = f"Sent from {acc['email']} to {to}. Check your Inbox (and Spam, just in case)."
+    if config.dry_run():
+        info += " (Campaigns are still in dry run: drivers get nothing until you switch to live.)"
+    c.execute("INSERT INTO send_log(account_id,recipient_id,ts,kind,dry) VALUES(?,?,?,'test',0)",
+              (acc["id"], None, now))
     db.set_setting(c, "test_inbox", to)
     return {"ok": True, "message": info}
 

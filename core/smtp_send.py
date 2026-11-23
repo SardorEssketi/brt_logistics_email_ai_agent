@@ -6,6 +6,8 @@ Error kinds:
   temporary - 4xx: retry this recipient later (max 2 retries)
   permanent - 5xx about this recipient/message: mark the row as failed
   network   - could not connect / dropped before the message was handed over: nothing was sent
+  login_dropped - Gmail hung up during login. From cloud servers Gmail often does this instead of answering
+              "wrong password", so it usually means the App Password is no longer accepted. Nothing was sent.
   uncertain - dropped while the message was being handed over: maybe sent -> checked via IMAP Sent Mail
 """
 import smtplib
@@ -79,6 +81,8 @@ def send(account_email: str, app_password: str, msg, smtp_factory=None, timeout:
     except (smtplib.SMTPException, OSError) as e:
         if phase == "send":
             raise SendError("uncertain", f"Connection dropped while sending: {e}")
+        if phase == "login":
+            raise SendError("login_dropped", f"Gmail closed the connection at login (App Password not accepted?): {e}")
         raise SendError("network", f"Could not reach Gmail ({phase}): {e}")
     finally:
         if server is not None:
@@ -90,4 +94,7 @@ def send(account_email: str, app_password: str, msg, smtp_factory=None, timeout:
 
 def test_login(account_email: str, app_password: str) -> None:
     with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30, context=ssl.create_default_context()) as s:
-        s.login(account_email, app_password)
+        try:
+            s.login(account_email, app_password)
+        except smtplib.SMTPServerDisconnected:
+            raise RuntimeError("Gmail did not accept the App Password (it closed the connection at login)") from None

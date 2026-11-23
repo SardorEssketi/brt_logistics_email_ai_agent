@@ -21,7 +21,7 @@
     </nav>
   </div>
 </header>
-{% if dry_run %}<div class="banner dry"><b>Dry run:</b> emails are saved as files on the server, not sent. Notes are still written to the list.</div>{% endif %}
+{% if dry_run %}<div class="banner dry"><b>Dry run:</b> campaign emails are saved as files on the server, not sent. Notes are still written to the list. “Send test” emails to your own address are really sent.</div>{% endif %}
 <main>
   {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
   {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}

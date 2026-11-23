@@ -47,7 +47,7 @@ def test_cross_site_post_blocked(client):
     assert r.status_code == 403
 
 
-def test_full_flow_xlsx(client, conn, tmp_path):
+def test_full_flow_xlsx(client, conn, tmp_path, monkeypatch):
     login(client)
     add_account(conn, "rec1@gmail.com")
     db.suppress(conn, "unsub@gmail.com", "unsubscribed")
@@ -74,8 +74,12 @@ def test_full_flow_xlsx(client, conn, tmp_path):
     assert "Will send" in r.text and "Start sending to 2 drivers" in r.text, r.text[-3000:]
     assert "joe@gmial.com" in r.text  # typo offered
 
+    from core import smtp_send
+    test_mails = []
+    monkeypatch.setattr(smtp_send, "send", lambda acc, pw, msg, **k: test_mails.append(msg))
     t = client.post(f"/api/campaigns/{cid}/test-send", data={"to": "me@example.com"}).json()
-    assert t["ok"] and "DRY RUN" in t["message"]
+    assert t["ok"] and "Sent from" in t["message"] and "still in dry run" in t["message"]
+    assert [m["To"] for m in test_mails] == ["me@example.com"]   # really sent, even in dry run, only to me
 
     r = client.post(f"/campaigns/{cid}/start", follow_redirects=False)
     assert r.status_code == 303 and conn.execute("SELECT status FROM campaigns WHERE id=?", (cid,)).fetchone()[0] == "running"
