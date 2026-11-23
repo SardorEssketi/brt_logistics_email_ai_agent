@@ -31,6 +31,8 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.globals.update(fmt_ct=timeutil.fmt_central, col_letter=columns.col_letter, skip_labels=SKIP_LABELS)
+# Changes whenever app.css / app.js change, so browsers don't keep an old copy after an update.
+templates.env.globals["static_v"] = int(max((HERE / "static" / f).stat().st_mtime for f in ("app.css", "app.js")))
 
 
 def conn():
@@ -142,8 +144,21 @@ def dashboard(request: Request):
         d.update(outcomes.campaign_rates(c, camp["id"]))
         d["remaining"] = c.execute("SELECT COUNT(*) FROM recipients WHERE campaign_id=? AND status IN "
                                    "('queued','sending')", (camp["id"],)).fetchone()[0]
+        d["link"], d["draft_step"] = _campaign_link(camp)
         rows.append(d)
     return page(request, "dashboard.html", campaigns=rows, alerts=alerts(c), accounts=account_rows(c))
+
+
+def _campaign_link(camp):
+    """Where a click on the campaign should go, and (for drafts) which setup step it is waiting on."""
+    cid = camp["id"]
+    if camp["status"] != "draft":
+        return f"/campaigns/{cid}", ""
+    if camp["mapping"] and (camp["subject"] or "").strip() and (camp["body"] or "").strip():
+        return f"/campaigns/{cid}/review", "Step 4: check & start"
+    if camp["mapping"]:
+        return f"/campaigns/{cid}/compose", "Step 3: message"
+    return f"/campaigns/{cid}/map", "Step 2: columns"
 
 
 @app.post("/alerts/{eid}/dismiss")
@@ -793,4 +808,6 @@ def unsub_post(token: str):
 
 @app.exception_handler(LookupError)
 def not_found(request: Request, exc):
-    return HTMLResponse("<p>Not found. <a href='/'>Back</a></p>", status_code=404)
+    resp = page(request, "error.html", message="That campaign or page doesn't exist. It may have been deleted.")
+    resp.status_code = 404
+    return resp

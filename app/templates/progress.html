@@ -3,11 +3,16 @@
 {% block content %}
 <div class="row-between">
   <h1>{{ camp.name or ('Campaign ' ~ camp.id) }}</h1>
-  <span class="status" id="st-status">{{ camp.status }}</span>
+  <span class="status {{ camp.status }}" id="st-status">{{ camp.status }}</span>
 </div>
 <div id="st-reason" class="alert amber" hidden></div>
 <div id="st-red"></div>
-<p class="muted" id="st-window"></p>
+
+<div class="road" aria-live="polite">
+  <div class="road-bar" role="progressbar" aria-label="Emails sent" aria-valuemin="0" aria-valuemax="100" id="road-bar"><i id="road-fill"></i></div>
+  <div class="road-label"><span id="road-text">Loading…</span><span id="st-estimate"></span></div>
+</div>
+<p class="muted small-text" id="st-window"></p>
 
 <div class="counters">
   <div><span id="c-sent">–</span>Sent</div>
@@ -17,21 +22,22 @@
   <div><span id="c-unsubs">–</span>Unsubscribes</div>
   <div><span id="c-errors">–</span>Errors</div>
 </div>
-<p class="muted" id="st-estimate"></p>
 
 <div class="controls">
-  <form method="post" action="/campaigns/{{ camp.id }}/pause" id="f-pause"><button>Pause</button></form>
-  <form method="post" action="/campaigns/{{ camp.id }}/resume" id="f-resume"><button class="primary">Resume</button></form>
-  <form method="post" action="/campaigns/{{ camp.id }}/stop" id="f-stop" onsubmit="return confirm('Stop for good? Drivers not yet emailed will not be emailed by this campaign.')"><button class="danger">Stop</button></form>
+  <form method="post" action="/campaigns/{{ camp.id }}/pause" id="f-pause" hidden><button>Pause</button></form>
+  <form method="post" action="/campaigns/{{ camp.id }}/resume" id="f-resume" hidden><button class="primary">Resume</button></form>
+  <form method="post" action="/campaigns/{{ camp.id }}/stop" id="f-stop" hidden onsubmit="return confirm('Stop for good? Drivers not yet emailed will not be emailed by this campaign.')"><button class="danger">Stop</button></form>
   <a class="button" href="/campaigns/{{ camp.id }}/log.csv">Download log (CSV)</a>
 </div>
 
 <section class="card">
   <h2>Per account</h2>
+  <div class="scroll">
   <table class="grid" id="acc-table">
-    <thead><tr><th>Account</th><th>Sent (this campaign)</th><th>Last 24 h / cap</th><th>Replies</th><th>Bounces</th><th>Unsubs</th><th>Errors</th><th>State</th></tr></thead>
+    <thead><tr><th>Account</th><th class="n">Sent here</th><th class="n">Last 24 h / cap</th><th class="n">Replies</th><th class="n">Bounces</th><th class="n">Unsubs</th><th class="n">Errors</th><th>State</th></tr></thead>
     <tbody></tbody>
   </table>
+  </div>
 </section>
 
 <section class="card">
@@ -39,10 +45,10 @@
   <p id="marks-info" class="muted"></p>
   {% if camp.source_type != 'gsheet' %}
   <div class="controls">
-    <button id="save-file" class="primary" hidden>Save marks to Excel file</button>
+    <button id="save-file" class="primary" hidden>Save notes into the Excel file</button>
     <a class="button" href="/campaigns/{{ camp.id }}/download">Download marked copy</a>
   </div>
-  <p id="save-out"></p>
+  <p id="save-out" role="status"></p>
   {% else %}
   <p class="muted">Notes are written into the Google Sheet automatically, in small batches.</p>
   {% endif %}

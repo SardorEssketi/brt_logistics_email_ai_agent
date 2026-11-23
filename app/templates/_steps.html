@@ -1,0 +1,14 @@
+{# Wizard progress. Needs: step (1-4); camp (optional, for links back to earlier steps). #}
+{% set step_names = ['Driver list', 'Columns', 'Message', 'Check & start'] %}
+<ol class="steps" aria-label="Campaign setup steps">
+  {% for name in step_names %}
+  {% set n = loop.index %}
+  <li class="{{ 'current' if n == step else ('done' if n < step else '') }}">
+    {% if n < step and n > 1 and camp %}
+      <a href="/campaigns/{{ camp.id }}/{{ ['', '', 'map', 'compose'][n] }}"><span class="num">{{ n }}.</span><span class="label">{{ name }}</span></a>
+    {% else %}
+      <span {% if n == step %}aria-current="step"{% endif %}><span class="num">{{ n }}.</span><span class="label">{{ name }}</span></span>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>

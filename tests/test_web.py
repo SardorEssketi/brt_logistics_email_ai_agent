@@ -125,7 +125,7 @@ def test_map_requires_email_choice(client, conn, tmp_path):
     r = client.post("/campaigns/new", files={"file": ("x.csv", p.read_bytes())}, follow_redirects=False)
     cid = int(re.search(r"/campaigns/(\d+)/map", r.headers["location"]).group(1))
     page = client.get(f"/campaigns/{cid}/map").text
-    assert "not found — please choose" in page
+    assert "Not found. Choose the column." in page
     r = client.post(f"/campaigns/{cid}/map", data={"tab": "CSV", "header_row": "1"}, follow_redirects=False)
     assert "err=" in r.headers["location"]
 

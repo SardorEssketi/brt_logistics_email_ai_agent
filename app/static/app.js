@@ -22,7 +22,14 @@ async function idbGet(key) {
   try { const db = await idb(); const tx = db.transaction("handles", "readonly"); const req = tx.objectStore("handles").get(key);
     return await new Promise((r) => { req.onsuccess = () => r(req.result); req.onerror = () => r(null); }); } catch (e) { return null; }
 }
-const PICKER_TYPES = [{ description: "Excel or CSV", accept: {
+// Buttons with data-busy="…" show that text and lock while their form submits (stops double clicks on slow steps).
+document.addEventListener("submit", (ev) => {
+  if (ev.defaultPrevented) return;
+  const btn = ev.submitter || ev.target.querySelector("button[data-busy]");
+  if (btn && btn.dataset.busy) { setTimeout(() => { btn.disabled = true; btn.textContent = btn.dataset.busy; }, 0); }
+});
+
+const PICKER_TYPES =[{ description: "Excel or CSV", accept: {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
   "application/vnd.ms-excel.sheet.macroEnabled.12": [".xlsm"], "text/csv": [".csv"] } }];
 
@@ -102,10 +109,17 @@ function initSettings() {
   }));
   const warn = $(".cap-warning");
   const caps = document.querySelectorAll("input.cap");
-  const check = () => { if (warn) warn.hidden = ![...caps].some((i) => Number(i.value) > 100); };
+  const risky = Number(warn?.dataset.risky || 100);
+  const check = () => { if (warn) warn.hidden = ![...caps].some((i) => Number(i.value) > risky); };
   caps.forEach((i) => i.addEventListener("input", check)); check();
 }
 if (document.querySelector("[data-test-account], input.cap")) initSettings();
+
+document.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied"; }
+  catch (e) { b.textContent = "Select and copy it"; }
+  setTimeout(() => (b.textContent = "Copy"), 2000);
+}));
 
 // ---------- Progress ----------
 function initProgress(cid, sourceType, originalName) {
@@ -118,24 +132,31 @@ function initProgress(cid, sourceType, originalName) {
     catch (e) { return; }
     const st = $("#st-status"); st.textContent = j.status; st.className = "status " + j.status;
     for (const k of ["sent", "remaining", "replies", "bounces", "unsubs", "errors"]) $("#c-" + k).textContent = j[k];
+    const total = j.sent + j.remaining + j.errors, pct = total ? Math.round((j.sent / total) * 100) : 0;
+    $("#road-fill").style.width = pct + "%"; $("#road-bar").setAttribute("aria-valuenow", pct);
+    $("#road-text").textContent = total ? `${j.sent} of ${total} sent (${pct}%)` : "Nobody to send to.";
     const reason = $("#st-reason"); reason.hidden = !j.reason; reason.textContent = j.reason || "";
     $("#st-window").textContent = j.status === "running" ? j.window : "";
     $("#st-estimate").textContent = j.estimate ? `Estimated finish: ${j.estimate}` : "";
+    if (!j.estimate && j.status === "done") $("#st-estimate").textContent = "Finished";
     $("#st-red").innerHTML = j.red.map((m) => `<div class="alert red">${esc(m)}</div>`).join("");
     show("#f-pause", j.status === "running"); show("#f-resume", j.status === "paused");
     show("#f-stop", j.status === "running" || j.status === "paused");
-    $("#acc-table tbody").innerHTML = j.accounts.map((a) => `<tr><td>${esc(a.email)}</td><td>${a.sent}</td>
-      <td>${a.sent_24h} / ${a.cap}</td><td>${a.replies}</td><td>${a.bounces}</td><td>${a.unsubs}</td><td>${a.errors}</td>
-      <td>${a.state === "ok" ? (a.next_in > 0 && j.status === "running" ? `next in ${Math.ceil(a.next_in / 60)} min` : "ready")
-        : a.state === "paused" ? `<span class="bad-text">resting until ${esc(a.paused_until)}</span>`
-        : `<span class="bad-text">STOPPED: ${esc(a.disabled_reason)}</span>`}</td></tr>`).join("");
+    const accState = (a) => a.state === "ok"
+      ? (a.next_in > 0 && j.status === "running" ? `<span class="status running">Next in ${Math.ceil(a.next_in / 60)} min</span>` : `<span class="status running">Ready</span>`)
+      : a.state === "paused" ? `<span class="status paused">Resting</span><span class="status-note">until ${esc(a.paused_until)}</span>`
+      : a.state === "no_name" ? `<span class="status stopped">Blocked</span><span class="status-note">No sender name. <a href="/settings#accounts">Add one</a></span>`
+      : `<span class="status stopped">Stopped</span><span class="status-note">${esc(a.disabled_reason || "")}</span>`;
+    $("#acc-table tbody").innerHTML = j.accounts.map((a) => `<tr><td>${esc(a.email)}</td><td class="n">${a.sent}</td>
+      <td class="n">${a.sent_24h} / ${a.cap}</td><td class="n">${a.replies}</td><td class="n">${a.bounces}</td><td class="n">${a.unsubs}</td>
+      <td class="n">${a.errors}</td><td>${accState(a)}</td></tr>`).join("");
     const m = j.marks; lastTotal = m.total;
     $("#marks-info").textContent = `${m.total - m.pending - m.unmatched.length} note(s) written` +
       (m.pending ? `, ${m.pending} waiting to be written` : "") + (m.last_error ? ` — last problem: ${m.last_error} (will retry)` : "");
     $("#unmatched").innerHTML = m.unmatched.length ? `<div class="alert amber"><b>${m.unmatched.length} note(s) couldn't be written</b>
       (row not found — the email was changed or the row deleted):<ul>${m.unmatched.map((u) =>
       `<li>Row ${u.row_num}, ${esc(u.email || "(no email)")}: ${esc(u.note)}</li>`).join("")}</ul></div>` : "";
-    $("#st-alerts").innerHTML = j.alerts.length ? j.alerts.map((a) => `<div class="alert ${a.level === "error" ? "red" : "amber"}">${esc(a.message)}</div>`).join("") : "None.";
+    $("#st-alerts").innerHTML = j.alerts.length ? j.alerts.map((a) => `<div class="alert ${a.level === "error" ? "red" : "amber"}"><span>${esc(a.message)}</span></div>`).join("") : "None.";
   }
 
   async function saveMarks(interactive) {
@@ -158,7 +179,7 @@ function initProgress(cid, sourceType, originalName) {
       out.className = "bad-text";
       const why = e.name === "NotAllowedError" ? "Permission to write the file was not given."
         : e.name === "NotFoundError" ? "The original file was moved, renamed or deleted."
-        : `Couldn't write the file — it may be open in Excel or read-only. Close it in Excel and click "Save marks" again. (${e.message})`;
+        : `Couldn't write the file. It may be open in Excel or read-only: close it in Excel and click "Save notes" again. (${e.message})`;
       out.textContent = why + ' You can always use "Download marked copy" instead.';
     } finally { saving = false; }
   }
@@ -169,13 +190,13 @@ function initProgress(cid, sourceType, originalName) {
     if (!FSA) { $("#save-out").textContent = "Your browser can't save into the original file (use Chrome or Edge). Use \"Download marked copy\"."; return; }
     handle = await idbGet("campaign-" + cid);
     btn.hidden = false;
-    if (!handle) btn.textContent = "Choose the original file to save marks into…";
+    if (!handle) btn.textContent = "Choose the original file to save notes into…";
     btn.addEventListener("click", async () => {
       if (!handle) {
         try { [handle] = await window.showOpenFilePicker({ types: PICKER_TYPES }); } catch (e) { return; }
         if ((await handle.getFile()).name !== originalName &&
             !confirm(`This file is not named "${originalName}". Save the marks into it anyway?`)) { handle = null; return; }
-        await idbPut("campaign-" + cid, handle); btn.textContent = "Save marks to Excel file";
+        await idbPut("campaign-" + cid, handle); btn.textContent = "Save notes into the Excel file";
       }
       saveMarks(true);
     });

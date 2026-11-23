@@ -1,5 +1,9 @@
 {% extends "base.html" %}
+{% block title %}Problem · Driver Outreach{% endblock %}
 {% block content %}
-<div class="flash bad">{{ message }}</div>
-<p><a href="/">Back to campaigns</a></p>
+<div class="card empty">
+  <h1>Something isn't right</h1>
+  <p>{{ message }}</p>
+  <a class="button primary" href="/">Back to campaigns</a>
+</div>
 {% endblock %}

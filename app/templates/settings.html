@@ -2,129 +2,144 @@
 {% block title %}Settings · Driver Outreach{% endblock %}
 {% block content %}
 <h1>Settings</h1>
+<nav class="settings-nav" aria-label="Settings sections">
+  <a href="#accounts">Gmail accounts</a><a href="#window">Sending window</a><a href="#caps">Daily caps</a>
+  <a href="#test-inbox">Test address</a><a href="#suppression">Do-not-email list</a><a href="#sheets">Google Sheets</a>
+</nav>
 
-<section class="card">
+<section class="card" id="accounts">
   <h2>Gmail accounts</h2>
-  <p class="muted">Each account needs 2-Step Verification and an App Password (see the README). The password is tested, then stored encrypted.</p>
-  <table class="grid">
-    <thead><tr><th>Account</th><th>Week in tool</th><th>Sent last 24 h</th><th>Daily cap</th><th>State</th><th></th></tr></thead>
-    <tbody>
-    {% for a in accounts %}
-    <tr>
-      <td><b>{{ a.email }}</b>
-        <form method="post" action="/settings/accounts/{{ a.id }}/name" class="sender-name">
-          <label>Sender name (shown in the inbox)
-            <input name="display_name" value="{{ a.display_name }}" placeholder="Mike - ABC Logistics" maxlength="80"
-                   class="{{ 'missing' if not a.display_name }}"></label>
-          <button class="small">Save</button>
+  <p class="muted">Each account needs 2-Step Verification and an App Password (README part 6). The password is tested, then stored encrypted.</p>
+
+  <div class="account-list">
+  {% for a in accounts %}
+  <div class="account {{ 'blocked' if a.state in ('no_name', 'disabled') }}">
+    <div>
+      <div class="account-email">{{ a.email }}</div>
+      <div class="account-facts">
+        <span>Week <b>{{ a.week }}</b> in the tool</span>
+        <span>Sent last 24 h: <b>{{ a.sent_24h }}</b></span>
+        <span>Daily cap: <b>{{ a.cap }}</b>{% if a.cap_override %} <span class="tag">custom</span>{% endif %}</span>
+      </div>
+      <form method="post" action="/settings/accounts/{{ a.id }}/name" class="sender-name">
+        <label>Sender name (shown in the inbox)
+          <input name="display_name" value="{{ a.display_name }}" placeholder="Mike - ABC Logistics" maxlength="80"
+                 class="{{ 'missing' if not a.display_name }}"></label>
+        <button class="small">Save</button>
+      </form>
+      {% if not a.display_name %}<div class="bad-text small-text" style="margin-top:4px">This account can't send until it has a sender name.</div>{% endif %}
+    </div>
+    <div>
+      {% if a.state == 'ok' %}<span class="status running">Ready</span>
+      {% elif a.state == 'paused' %}<span class="status paused">Resting</span><span class="status-note">until {{ a.paused_until_ct }}</span>
+      {% elif a.state == 'no_name' %}<span class="status stopped">Blocked</span><span class="status-note">No sender name</span>
+      {% else %}<span class="status stopped">Stopped</span><span class="status-note">{{ a.disabled_reason }}</span>{% endif %}
+    </div>
+    <div class="actions">
+      <button type="button" class="small" data-test-account="{{ a.id }}">Test connection</button>
+      {% if a.state in ('paused', 'disabled') %}
+      <form method="post" action="/settings/accounts/{{ a.id }}/reenable" class="inline"><button class="small">Re-enable</button></form>
+      {% endif %}
+      <details class="inline-details"><summary class="small">New App Password</summary>
+        <form method="post" action="/settings/accounts/{{ a.id }}/password">
+          <input name="app_password" type="password" placeholder="16 letters" required autocomplete="new-password" aria-label="New App Password">
+          <button class="small">Save and test</button>
         </form>
-        {% if not a.display_name %}<div class="bad-text small-text">This account can't send until it has a sender name.</div>{% endif %}
-      </td>
-      <td>{{ a.week }}</td>
-      <td>{{ a.sent_24h }}</td>
-      <td>{{ a.cap }}{% if a.cap_override %} <span class="tag">custom</span>{% endif %}</td>
-      <td>
-        {% if a.state == 'ok' %}<span class="status running">OK</span>
-        {% elif a.state == 'paused' %}<span class="status paused">Resting until {{ a.paused_until_ct }}</span>
-        {% elif a.state == 'no_name' %}<span class="status stopped">Blocked</span><br><small>No sender name</small>
-        {% else %}<span class="status stopped">Stopped</span><br><small>{{ a.disabled_reason }}</small>{% endif %}
-      </td>
-      <td class="actions">
-        <button type="button" class="small" data-test-account="{{ a.id }}">Test connection</button>
-        {% if a.state in ('paused', 'disabled') %}
-        <form method="post" action="/settings/accounts/{{ a.id }}/reenable" class="inline"><button class="small">Re-enable</button></form>
-        {% endif %}
-        <details><summary class="small">New App Password</summary>
-          <form method="post" action="/settings/accounts/{{ a.id }}/password">
-            <input name="app_password" type="password" placeholder="16 letters" required>
-            <button class="small">Save &amp; test</button>
-          </form>
-        </details>
-        <form method="post" action="/settings/accounts/{{ a.id }}/delete" class="inline" onsubmit="return confirm('Remove {{ a.email }}?')"><button class="small danger">Remove</button></form>
-        <div class="test-result" id="test-{{ a.id }}"></div>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="6" class="muted">No accounts yet.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
+      </details>
+      <form method="post" action="/settings/accounts/{{ a.id }}/delete" class="inline" onsubmit="return confirm('Remove {{ a.email }}? It stops sending right away.')"><button class="small danger">Remove</button></form>
+      <div class="test-result" id="test-{{ a.id }}" role="status"></div>
+    </div>
+  </div>
+  {% else %}
+  <p class="muted">No accounts yet. Add the first one below.</p>
+  {% endfor %}
+  </div>
+
+  <h3 class="subhead">Add an account</h3>
   <form method="post" action="/settings/accounts/add" class="form-row">
     <label>Gmail address <input name="email" type="email" placeholder="name@gmail.com" required></label>
     <label>Sender name (shown in the inbox) <input name="display_name" placeholder="Mike - ABC Logistics" maxlength="80"></label>
     <label>App Password <input name="app_password" type="password" placeholder="xxxx xxxx xxxx xxxx" required autocomplete="new-password"></label>
-    {% if dry_run %}<label class="check"><input type="checkbox" name="skip_test" value="1"> Skip connection test (dry run only)</label>{% endif %}
-    <button class="primary">Add &amp; test</button>
+    <button class="primary" data-busy="Testing…">Add and test</button>
+    {% if dry_run %}<label class="check" style="flex-basis:100%"><input type="checkbox" name="skip_test" value="1"> Skip the connection test (dry run only)</label>{% endif %}
   </form>
-  <p class="tip">Sender name: use a real person's name, e.g. <b>Mike - ABC Logistics</b>. An account without a sender name doesn't send.</p>
+  <p class="tip small-text">Use a real person's name as the sender name, e.g. <b>Mike - ABC Logistics</b>. An account without a sender name doesn't send.</p>
 </section>
 
-<section class="card">
-  <h2>Sending window (US Central time)</h2>
-  <form method="post" action="/settings/window" class="form-row">
+<section class="card" id="window">
+  <h2>Sending window</h2>
+  <p class="muted">Emails go out only on these days and hours, US Central time.</p>
+  <form method="post" action="/settings/window">
     <div class="days">
-      {% for d in day_names %}<label class="check"><input type="checkbox" name="days" value="{{ loop.index0 }}" {% if loop.index0 in window.days %}checked{% endif %}> {{ d }}</label>{% endfor %}
+      {% for d in day_names %}<label class="day"><input type="checkbox" name="days" value="{{ loop.index0 }}" {% if loop.index0 in window.days %}checked{% endif %}> {{ d }}</label>{% endfor %}
     </div>
-    <label>From <input type="time" name="start" value="{{ window.start }}"></label>
-    <label>To <input type="time" name="end" value="{{ window.end }}"></label>
-    <button class="primary">Save</button>
+    <div class="time-fields">
+      <label>From <input type="time" name="start" value="{{ window.start }}"></label>
+      <label>To <input type="time" name="end" value="{{ window.end }}"></label>
+      <button class="primary" style="margin:10px 0">Save window</button>
+    </div>
   </form>
-  <p>That is <b>{{ tashkent }}</b> Tashkent time today. (The Tashkent time shifts by one hour when the US changes clocks.)</p>
+  <p>That is <b>{{ tashkent }}</b> Tashkent time today. Tashkent time shifts by one hour when the US changes clocks.</p>
 </section>
 
-<section class="card">
+<section class="card" id="caps">
   <h2>Daily caps and warm-up</h2>
-  <p class="muted">Counted over a rolling 24 hours per account. New accounts start low and grow each week. Above {{ risky }}/day a free Gmail account is at high risk of being locked. Maximum {{ hard_max }}.</p>
+  <p class="muted">Counted over a rolling 24 hours per account. New accounts start low and grow each week. Above {{ risky }} a day, a free Gmail account is at high risk of being locked. Maximum {{ hard_max }}.</p>
   <form method="post" action="/settings/caps">
-    <table class="grid compact">
-      <tr><th>Week 1</th><th>Week 2</th><th>Week 3</th><th>Week 4+</th></tr>
-      <tr>{% for w in warmup %}<td><input type="number" class="cap" name="w{{ loop.index0 }}" min="1" max="{{ hard_max }}" value="{{ w }}"></td>{% endfor %}</tr>
-    </table>
+    <div class="caps-grid">
+      {% for w in warmup %}<label>{{ 'Week ' ~ loop.index ~ ('+' if loop.last else '') }}
+        <input type="number" class="cap" name="w{{ loop.index0 }}" min="1" max="{{ hard_max }}" value="{{ w }}"></label>{% endfor %}
+    </div>
     {% if accounts %}
-    <p>Custom cap per account (leave empty to follow the warm-up):</p>
+    <h3 class="subhead">Custom cap per account</h3>
+    <p class="muted small-text">Leave empty to follow the warm-up.</p>
+    <div class="scroll">
     <table class="grid compact">
-      {% for a in accounts %}<tr><td>{{ a.email }}</td><td><input type="number" class="cap" name="cap_{{ a.id }}" min="1" max="{{ hard_max }}" value="{{ a.cap_override or '' }}" placeholder="warm-up: {{ a.warmup_cap }}"></td></tr>{% endfor %}
+      {% for a in accounts %}<tr><td style="vertical-align:middle"><label for="cap_{{ a.id }}" style="margin:0;font-weight:400">{{ a.email }}</label></td>
+        <td style="width:150px"><input type="number" class="cap" id="cap_{{ a.id }}" name="cap_{{ a.id }}" min="1" max="{{ hard_max }}" value="{{ a.cap_override or '' }}" placeholder="{{ a.warmup_cap }}" style="margin:0"></td></tr>{% endfor %}
     </table>
+    </div>
     {% endif %}
-    <div class="cap-warning alert red" hidden>A cap above {{ risky }}/day is a high risk of account lock on a free Gmail.</div>
-    <button class="primary">Save caps</button>
+    <div class="cap-warning alert red" data-risky="{{ risky }}" hidden>A cap above {{ risky }} a day is a high risk of account lock on a free Gmail.</div>
+    <button class="primary" style="margin-top:12px">Save caps</button>
   </form>
 </section>
 
-<section class="card">
-  <h2>"Send test to myself" address</h2>
+<section class="card" id="test-inbox">
+  <h2>Test address</h2>
+  <p class="muted">Where “Send test” emails go before you start a campaign.</p>
   <form method="post" action="/settings/test-inbox" class="form-row">
     <label>Your email <input name="test_inbox" type="email" value="{{ test_inbox }}"></label>
-    <button>Save</button>
+    <button>Save address</button>
   </form>
 </section>
 
-<section class="card">
+<section class="card" id="suppression">
   <h2>Do-not-email list</h2>
+  <p class="muted">Checked before every email, across all campaigns. Unsubscribes, bounces and replies are added automatically.</p>
   <p>
-    {% for s in suppressed %}<span class="tag">{{ s.reason }}: {{ s.n }}</span> {% else %}<span class="muted">Empty.</span>{% endfor %}
+    {% for s in suppressed %}<span class="tag">{{ s.reason }}: {{ s.n }}</span> {% else %}<span class="muted">The list is empty.</span>{% endfor %}
   </p>
-  <p class="muted">Checked before every single email, across all campaigns. Unsubscribes, bounces and replies are added automatically.</p>
-  <div class="form-row">
-    <a class="button" href="/settings/suppression.csv">Export CSV</a>
-    <form method="post" action="/settings/suppression/import" enctype="multipart/form-data" class="form-row">
-      <label>Import CSV (email in first column) <input type="file" name="file" accept=".csv" required></label>
-      <button>Import</button>
-    </form>
-    <form method="post" action="/settings/suppression/add" class="form-row">
-      <label>Add one address <input name="email" type="email" required></label>
+  <div class="suppress-tools">
+    <form method="post" action="/settings/suppression/add">
+      <label>Add one address <input name="email" type="email" required placeholder="driver@example.com"></label>
       <button>Add</button>
     </form>
+    <form method="post" action="/settings/suppression/import" enctype="multipart/form-data">
+      <label>Import a CSV <span class="hint">Email addresses in the first column.</span><input type="file" name="file" accept=".csv" required></label>
+      <button>Import</button>
+    </form>
   </div>
+  <p style="margin-top:14px"><a class="button" href="/settings/suppression.csv">Export the list (CSV)</a></p>
 </section>
 
-<section class="card">
+<section class="card" id="sheets">
   <h2>Google Sheets</h2>
   {% if sa_email %}
   <p>To use a Google Sheet, click <b>Share</b> in the sheet and add this address as <b>Editor</b>:</p>
-  <p><code class="copy">{{ sa_email }}</code></p>
+  <p><code class="copy">{{ sa_email }}</code> <button type="button" class="small" data-copy="{{ sa_email }}">Copy</button></p>
   {% else %}
-  <p class="muted">Not set up yet. Follow README part 4 to create the service account, then upload its key file to the server.</p>
+  <p class="muted">Not set up yet. Follow README part 7 to create the service account, then put its key file on the server.</p>
   {% endif %}
 </section>
 {% endblock %}

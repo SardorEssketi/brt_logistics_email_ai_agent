@@ -1,47 +1,73 @@
 {% extends "base.html" %}
 {% block content %}
 {% if not accounts %}
-<div class="flash bad">No Gmail account yet. <a href="/settings">Add one in Settings</a>.</div>
+<div class="alert amber"><span>No Gmail account yet, so nothing can be sent. <a href="/settings#accounts">Add one in Settings</a>.</span></div>
 {% endif %}
 
 {% for a in alerts %}
 <div class="alert {{ 'red' if a.level == 'error' else 'amber' }}">
-  <span>{{ fmt_ct(a.ts) }} — {{ a.message }}</span>
+  <span><span class="when">{{ fmt_ct(a.ts) }}</span>{{ a.message }}</span>
   <form method="post" action="/alerts/{{ a.id }}/dismiss" class="inline"><input type="hidden" name="back" value="/"><button class="link">Dismiss</button></form>
 </div>
 {% endfor %}
 
 <div class="row-between">
   <h1>Campaigns</h1>
-  <a class="button primary" href="/campaigns/new">+ New campaign</a>
+  <a class="button primary" href="/campaigns/new">New campaign</a>
 </div>
 
 {% if campaigns %}
+<div class="list-table scroll">
 <table class="grid">
-  <thead><tr><th>Campaign</th><th>Status</th><th>Sent</th><th>Remaining</th><th>Replies</th><th>Bounces</th><th>Unsubs</th><th>Created</th></tr></thead>
+  <thead><tr><th>Campaign</th><th>Status</th><th class="n">Sent</th><th class="n">Remaining</th><th class="n">Replies</th><th class="n">Bounces</th><th class="n">Unsubscribes</th><th>Created</th></tr></thead>
   <tbody>
   {% for c in campaigns %}
+  {% set draft = c.status == 'draft' %}
   <tr>
-    <td><a href="/campaigns/{{ c.id }}{% if c.status == 'draft' %}/map{% endif %}">{{ c.name or ('Campaign ' ~ c.id) }}</a>{% if c.dry_run %} <span class="tag">dry run</span>{% endif %}</td>
-    <td><span class="status {{ c.status }}">{{ c.status }}</span></td>
-    <td>{{ c.sent }}</td><td>{{ c.remaining }}</td><td>{{ c.replies }}</td><td>{{ c.bounces }}</td><td>{{ c.unsubs }}</td>
-    <td>{{ fmt_ct(c.created_at) }}</td>
+    <td><a class="camp-name" href="{{ c.link }}">{{ c.name or ('Campaign ' ~ c.id) }}</a>{% if c.dry_run %} <span class="tag">dry run</span>{% endif %}</td>
+    <td><span class="status {{ c.status }}">{{ c.status }}</span>{% if draft %}<span class="status-note">{{ c.draft_step }}</span>{% endif %}</td>
+    {% if draft %}
+    <td class="n zero" colspan="5" style="text-align:left"><a href="{{ c.link }}">Continue setup</a></td>
+    {% else %}
+    {% for k in ('sent', 'remaining', 'replies', 'bounces', 'unsubs') %}
+    <td class="n {{ 'zero' if not c[k] }}">{{ c[k] }}</td>
+    {% endfor %}
+    {% endif %}
+    <td style="white-space:nowrap">{{ fmt_ct(c.created_at) }}</td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
-<p class="muted">No campaigns yet.</p>
+<div class="card empty">
+  <h2>No campaigns yet</h2>
+  <p class="muted">Pick a driver list (Excel, CSV or Google Sheet), write the message, and the tool sends it slowly from your Gmail accounts.</p>
+  <a class="button primary" href="/campaigns/new">Start your first campaign</a>
+</div>
 {% endif %}
 
-<h2>Gmail accounts</h2>
+<div class="row-between">
+  <h2>Gmail accounts</h2>
+  <a href="/settings#accounts" class="small-text">Manage accounts</a>
+</div>
+{% if accounts %}
+<div class="list-table scroll">
 <table class="grid">
-  <thead><tr><th>Account</th><th>Sent (last 24 h)</th><th>Daily cap</th><th>State</th></tr></thead>
+  <thead><tr><th>Account</th><th class="n">Sent (last 24 h)</th><th class="n">Daily cap</th><th>State</th></tr></thead>
   <tbody>
   {% for a in accounts %}
-  <tr><td>{{ a.display_name or '(no sender name)' }} &lt;{{ a.email }}&gt;</td><td>{{ a.sent_24h }}</td><td>{{ a.cap }}</td>
-    <td>{% if a.state == 'ok' %}<span class="status running">OK</span>{% elif a.state == 'paused' %}<span class="status paused">Resting until {{ a.paused_until_ct }}</span>{% elif a.state == 'no_name' %}<span class="status stopped">Blocked: no sender name — <a href="/settings">add one</a></span>{% else %}<span class="status stopped">Stopped: {{ a.disabled_reason }}</span>{% endif %}</td></tr>
+  <tr><td><b>{{ a.display_name or '(no sender name)' }}</b><br><span class="muted small-text">{{ a.email }}</span></td>
+    <td class="n">{{ a.sent_24h }}</td><td class="n">{{ a.cap }}</td>
+    <td>{% if a.state == 'ok' %}<span class="status running">Ready</span>
+      {% elif a.state == 'paused' %}<span class="status paused">Resting</span><span class="status-note">until {{ a.paused_until_ct }}</span>
+      {% elif a.state == 'no_name' %}<span class="status stopped">Blocked</span><span class="status-note">No sender name. <a href="/settings#accounts">Add one</a></span>
+      {% else %}<span class="status stopped">Stopped</span><span class="status-note">{{ a.disabled_reason }}</span>{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
+{% else %}
+<p class="muted">None yet.</p>
+{% endif %}
 {% endblock %}

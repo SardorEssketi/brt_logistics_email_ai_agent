@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Log in · Driver Outreach</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="preload" href="/static/fonts/overpass-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/app.css?v={{ static_v }}">
 </head>
 <body class="center">
+<div class="login-sign" aria-hidden="true"><span>Driver Outreach</span></div>
 <form method="post" action="/login" class="card narrow">
-  <h1>Driver Outreach</h1>
-  {% if err %}<div class="flash bad">{{ err }}</div>{% endif %}
+  <h1>Log in</h1>
+  {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
   <label>Username <input name="username" autocomplete="username" required autofocus></label>
   <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-  <button class="primary">Log in</button>
+  <button class="primary big" style="width:100%;margin-top:6px">Log in</button>
 </form>
 </body>
 </html>
