@@ -60,41 +60,60 @@ function initNewCampaign() {
   });
 }
 
-// ---------- Step 3: compose with live checker ----------
-function initCompose() {
-  const subj = $("#subject"), body = $("#body");
-  let last = body, timer = null;
+// ---------- Step 3: compose with live checker + live preview ----------
+function initCompose(cid) {
+  const subj = $("#subject"), body = $("#body"), form = $("#compose-form");
+  let last = body, timer = null, dirty = false;
   [subj, body].forEach((el) => el.addEventListener("focus", () => (last = el)));
   document.querySelectorAll("[data-insert]").forEach((el) => el.addEventListener("click", () => {
     const t = el.dataset.insert, s = last.selectionStart ?? last.value.length, e = last.selectionEnd ?? s;
     last.value = last.value.slice(0, s) + t + last.value.slice(e);
-    last.focus(); last.selectionStart = last.selectionEnd = s + t.length; run();
+    last.focus(); last.selectionStart = last.selectionEnd = s + t.length; dirty = true; run();
   }));
   async function run() {
-    const r = await fetch("/api/check", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: subj.value, body: body.value }) });
-    if (!r.ok) return;
-    const j = await r.json();
-    $("#check-out").innerHTML = j.blocks.map((b) => `<div class="alert red">${esc(b)}</div>`).join("") +
-      j.warnings.map((w) => `<div class="alert amber">${esc(w)}</div>`).join("") +
-      (!j.blocks.length && !j.warnings.length ? '<div class="alert green">Looks good.</div>' : "");
-    $("#word-count").textContent = `${j.words} words`;
+    const payload = JSON.stringify({ subject: subj.value, body: body.value });
+    const headers = { "Content-Type": "application/json" };
+    const [rc, rp] = await Promise.all([
+      fetch("/api/check", { method: "POST", headers, body: payload }),
+      fetch(`/api/campaigns/${cid}/preview`, { method: "POST", headers, body: payload }),
+    ]).catch(() => [null, null]);
+    if (rc && rc.ok) {
+      const j = await rc.json();
+      $("#check-out").innerHTML = j.blocks.map((b) => `<div class="alert red">${esc(b)}</div>`).join("") +
+        j.warnings.map((w) => `<div class="alert amber">${esc(w)}</div>`).join("") +
+        (!j.blocks.length && !j.warnings.length ? '<div class="alert green">Looks good.</div>' : "");
+      $("#word-count").textContent = `${j.words} words`;
+    }
+    if (rp && rp.ok) {
+      const p = await rp.json();
+      $("#pv-from").textContent = p.from;
+      $("#pv-subject").textContent = p.subject || "(no subject yet)";
+      $("#pv-text").textContent = p.text;
+      $("#pv-who").textContent = p.row ? `— as ${p.name || p.to} (row ${p.row}) gets it` : "";
+    }
   }
-  [subj, body].forEach((el) => el.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 400); }));
+  [subj, body].forEach((el) => el.addEventListener("input", () => { dirty = true; clearTimeout(timer); timer = setTimeout(run, 400); }));
+  form.addEventListener("submit", () => { dirty = false; });
+  window.addEventListener("beforeunload", (ev) => { if (dirty) { ev.preventDefault(); ev.returnValue = ""; } });
   run();
 }
 
 // ---------- Step 4: review / test send ----------
 function initReview(cid) {
+  const cards = [...document.querySelectorAll("[data-preview]")];
+  let shown = 0;
+  $("#next-preview")?.addEventListener("click", () => {
+    cards[shown].hidden = true; shown = (shown + 1) % cards.length; cards[shown].hidden = false;
+  });
   const f = $("#test-form");
   f?.addEventListener("submit", async (ev) => {
     ev.preventDefault();
-    const btn = f.querySelector("button"); btn.disabled = true;
-    $("#test-out").textContent = "Sending…"; $("#test-out").className = "";
+    const btn = f.querySelector("button"); btn.disabled = true; const label = btn.textContent; btn.textContent = "Sending…";
+    $("#test-out").textContent = ""; $("#test-out").className = "";
     const r = await fetch(`/api/campaigns/${cid}/test-send`, { method: "POST", body: new FormData(f) });
     const j = await r.json().catch(() => ({ ok: false, message: "Unexpected server response." }));
-    $("#test-out").textContent = j.message; $("#test-out").className = j.ok ? "ok-text" : "bad-text";
-    btn.disabled = false;
+    $("#test-out").textContent = j.message; $("#test-out").className = j.ok ? "alert green" : "alert red";
+    btn.disabled = false; btn.textContent = label;
   });
 }
 
@@ -126,37 +145,54 @@ function initProgress(cid, sourceType, originalName) {
   let handle = null, lastSavedTotal = -1, lastTotal = 0, saving = false;
   const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
 
+  const nf = (n) => Number(n).toLocaleString("en-US");
+  let lastStatus = null;
   async function poll() {
     let j;
     try { const r = await fetch(`/api/campaigns/${cid}/stats`); if (r.status === 401) { location.href = "/login"; return; } j = await r.json(); }
     catch (e) { return; }
-    const st = $("#st-status"); st.textContent = j.status; st.className = "status " + j.status;
-    for (const k of ["sent", "remaining", "replies", "bounces", "unsubs", "errors"]) $("#c-" + k).textContent = j[k];
+    // A status change (e.g. auto-pause) reloads the page so the buttons and messages are all current.
+    if (lastStatus && lastStatus !== j.status) { location.reload(); return; }
+    lastStatus = j.status;
+    const st = $("#st-status"); st.textContent = j.status_label; st.className = "status " + j.status;
+    const b = j.banner;
+    $("#st-banner").className = "st-banner " + b.tone;
+    $("#st-head").textContent = b.title === j.status_label ? "" : b.title;
+    $("#st-text").textContent = b.text;
+    $("#st-window").textContent = j.status === "running" && j.next_email ? j.next_email : "";
+    for (const k of ["sent", "remaining", "replies", "bounces", "unsubs", "errors"]) $("#c-" + k).textContent = nf(j[k]);
     const total = j.sent + j.remaining + j.errors, pct = total ? Math.round((j.sent / total) * 100) : 0;
     $("#road-fill").style.width = pct + "%"; $("#road-bar").setAttribute("aria-valuenow", pct);
-    $("#road-text").textContent = total ? `${j.sent} of ${total} sent (${pct}%)` : "Nobody to send to.";
-    const reason = $("#st-reason"); reason.hidden = !j.reason; reason.textContent = j.reason || "";
-    $("#st-window").textContent = j.status === "running" ? j.window : "";
-    $("#st-estimate").textContent = j.estimate ? `Estimated finish: ${j.estimate}` : "";
-    if (!j.estimate && j.status === "done") $("#st-estimate").textContent = "Finished";
-    $("#st-red").innerHTML = j.red.map((m) => `<div class="alert red">${esc(m)}</div>`).join("");
+    $("#road-text").textContent = total ? `${nf(j.sent)} of ${nf(total)} sent (${pct}%)` : "Nobody to send to.";
+    $("#st-estimate").textContent = j.estimate ? `Expected to finish around ${j.estimate}` : "";
+    $("#st-warnings").innerHTML = j.warnings.map((m) => `<div class="alert amber">${esc(m)}</div>`).join("");
+    $("#st-accprob").hidden = !j.account_problem;
+    $("#st-accprob-text").textContent = j.account_problem ? `Not every account can send: ${j.account_problem}.` : "";
     show("#f-pause", j.status === "running"); show("#f-resume", j.status === "paused");
-    show("#f-stop", j.status === "running" || j.status === "paused");
-    const accState = (a) => a.state === "ok"
-      ? (a.next_in > 0 && j.status === "running" ? `<span class="status running">Next in ${Math.ceil(a.next_in / 60)} min</span>` : `<span class="status running">Ready</span>`)
-      : a.state === "paused" ? `<span class="status paused">Resting</span><span class="status-note">until ${esc(a.paused_until)}</span>`
-      : a.state === "no_name" ? `<span class="status stopped">Blocked</span><span class="status-note">No sender name. <a href="/settings#accounts">Add one</a></span>`
-      : `<span class="status stopped">Stopped</span><span class="status-note">${esc(a.disabled_reason || "")}</span>`;
-    $("#acc-table tbody").innerHTML = j.accounts.map((a) => `<tr><td>${esc(a.email)}</td><td class="n">${a.sent}</td>
-      <td class="n">${a.sent_24h} / ${a.cap}</td><td class="n">${a.replies}</td><td class="n">${a.bounces}</td><td class="n">${a.unsubs}</td>
-      <td class="n">${a.errors}</td><td>${accState(a)}</td></tr>`).join("");
+    show("#f-stop-wrap", j.status === "running" || j.status === "paused");
+    const tone = (s) => (s === "ok" ? "running" : s === "paused" ? "paused" : "stopped");
+    const accNote = (a) => a.state === "ok"
+      ? (a.next_in > 0 && j.status === "running" ? `Next email in ${Math.ceil(a.next_in / 60)} min` : "")
+      : a.state === "paused" ? `Until ${esc(a.paused_until)}`
+      : a.state === "no_name" ? `<a href="/accounts#acc-${a.id}">Add a sender name</a>`
+      : `${esc(a.disabled_reason || "")} — <a href="/accounts#acc-${a.id}">Fix</a>`;
+    $("#acc-table tbody").innerHTML = j.accounts.map((a) => `<tr>
+      <td data-label="Account"><b>${esc(a.name || a.email)}</b><br><span class="muted small-text">${esc(a.email)}</span></td>
+      <td data-label="State" class="state-cell"><span class="status ${tone(a.state)}">${esc(a.state_label)}</span><span class="status-note">${accNote(a)}</span></td>
+      <td class="n" data-label="Sent here">${nf(a.sent)}</td><td class="n" data-label="Last 24 h">${a.sent_24h} of ${a.cap}</td>
+      <td class="n hide-sm" data-label="Replies">${a.replies}</td><td class="n hide-sm" data-label="Bounced">${a.bounces}</td>
+      <td class="n hide-sm" data-label="Unsubscribed">${a.unsubs}</td><td class="n hide-sm" data-label="Failed">${a.errors}</td></tr>`).join("");
     const m = j.marks; lastTotal = m.total;
-    $("#marks-info").textContent = `${m.total - m.pending - m.unmatched.length} note(s) written` +
-      (m.pending ? `, ${m.pending} waiting to be written` : "") + (m.last_error ? ` — last problem: ${m.last_error} (will retry)` : "");
-    $("#unmatched").innerHTML = m.unmatched.length ? `<div class="alert amber"><b>${m.unmatched.length} note(s) couldn't be written</b>
-      (row not found — the email was changed or the row deleted):<ul>${m.unmatched.map((u) =>
-      `<li>Row ${u.row_num}, ${esc(u.email || "(no email)")}: ${esc(u.note)}</li>`).join("")}</ul></div>` : "";
-    $("#st-alerts").innerHTML = j.alerts.length ? j.alerts.map((a) => `<div class="alert ${a.level === "error" ? "red" : "amber"}"><span>${esc(a.message)}</span></div>`).join("") : "None.";
+    const written = m.total - m.pending - m.unmatched.length;
+    $("#marks-info").textContent = !m.total ? "No results yet." :
+      `${nf(written)} of ${nf(m.total)} results written` + (sourceType === "gsheet" ? " into the sheet" : " on the server") +
+      (m.pending ? ` · ${nf(m.pending)} waiting` : "") + (m.last_error ? ` — last problem: ${m.last_error} (it retries by itself)` : ".");
+    $("#unmatched").innerHTML = m.unmatched.length ? `<div class="alert amber"><div><b>${m.unmatched.length} result(s) couldn't be written</b>
+      because the row was not found (the email was changed or the row deleted). Add them by hand:<ul>${m.unmatched.map((u) =>
+      `<li>Row ${u.row_num}, ${esc(u.email || "(no email)")}: ${esc(u.note)}</li>`).join("")}</ul></div></div>` : "";
+    $("#act-count").textContent = j.alerts.length ? `(${j.alerts.length})` : "";
+    $("#st-alerts").innerHTML = j.alerts.length ? j.alerts.map((a) =>
+      `<li class="${a.level === "error" ? "red" : "amber"}">${esc(a.message)}</li>`).join("") : '<li class="muted">Nothing yet.</li>';
   }
 
   async function saveMarks(interactive) {
@@ -179,24 +215,24 @@ function initProgress(cid, sourceType, originalName) {
       out.className = "bad-text";
       const why = e.name === "NotAllowedError" ? "Permission to write the file was not given."
         : e.name === "NotFoundError" ? "The original file was moved, renamed or deleted."
-        : `Couldn't write the file. It may be open in Excel or read-only: close it in Excel and click "Save notes" again. (${e.message})`;
-      out.textContent = why + ' You can always use "Download marked copy" instead.';
+        : `Couldn't write the file. It may be open in Excel or read-only: close it in Excel and click "Save into my original file" again. (${e.message})`;
+      out.textContent = why + ' You can always use "Download the list with results" instead.';
     } finally { saving = false; }
   }
 
   async function setupFile() {
     if (sourceType === "gsheet") return;
     const btn = $("#save-file");
-    if (!FSA) { $("#save-out").textContent = "Your browser can't save into the original file (use Chrome or Edge). Use \"Download marked copy\"."; return; }
+    if (!FSA) return;   // other browsers: the download button is the way
     handle = await idbGet("campaign-" + cid);
     btn.hidden = false;
-    if (!handle) btn.textContent = "Choose the original file to save notes into…";
+    if (!handle) btn.textContent = "Save into my original file…";
     btn.addEventListener("click", async () => {
       if (!handle) {
         try { [handle] = await window.showOpenFilePicker({ types: PICKER_TYPES }); } catch (e) { return; }
         if ((await handle.getFile()).name !== originalName &&
             !confirm(`This file is not named "${originalName}". Save the marks into it anyway?`)) { handle = null; return; }
-        await idbPut("campaign-" + cid, handle); btn.textContent = "Save notes into the Excel file";
+        await idbPut("campaign-" + cid, handle); btn.textContent = "Save into my original file";
       }
       saveMarks(true);
     });

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Gmail accounts · Wayflix Trucking Email Sender{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Gmail accounts</h1>
+    <p class="sub">Emails go out from these accounts, taking turns. Use 2–3 accounts made for recruiting, not anyone's main inbox.</p>
+  </div>
+  {% if accounts %}<a class="button primary" href="#add">Add account</a>{% endif %}
+</div>
+
+{% if accounts %}
+<ul class="acc-list">
+{% for a in accounts %}
+<li class="acc-card {{ 'problem' if a.state in ('no_name', 'disabled') }}" id="acc-{{ a.id }}">
+  <div class="acc-head">
+    <div>
+      <div class="acc-name">{{ a.display_name or '(no sender name)' }}</div>
+      <div class="acc-email">{{ a.email }}</div>
+    </div>
+    <span class="status {{ 'running' if a.state == 'ok' else ('paused' if a.state == 'paused' else 'stopped') }}">{{ account_state_labels[a.state] }}</span>
+  </div>
+
+  <dl class="facts">
+    <div><dt>Sent in last 24 h</dt><dd>{{ a.sent_24h }} of {{ a.cap }}</dd></div>
+    <div><dt>Daily limit</dt><dd>{{ a.cap }}{% if a.cap_override %} (custom){% else %} (week {{ a.week if a.week < 4 else '4+' }} warm-up){% endif %}</dd></div>
+    {% if a.state == 'paused' %}<div><dt>Resting until</dt><dd>{{ a.paused_until_ct }}</dd></div>{% endif %}
+  </dl>
+
+  {% if a.state == 'disabled' %}
+  <div class="fix">
+    <p><b>Stopped:</b> {{ a.disabled_reason }}. Nothing is sent from it until you fix it.</p>
+    <ol>
+      <li>Sign in to <b>{{ a.email }}</b> in a browser and clear any security warning Google shows.</li>
+      <li>Create a new App Password (see “How to get an App Password” below).</li>
+      <li>Paste it under <b>New App Password</b> here. The account is tested and turned back on.</li>
+    </ol>
+  </div>
+  {% elif a.state == 'paused' %}
+  <p class="muted small-text">Gmail said this account reached a sending limit, so it rests and starts again by itself. The other accounts keep sending.</p>
+  {% endif %}
+
+  <form method="post" action="/settings/accounts/{{ a.id }}/name" class="inline-field">
+    <label for="name-{{ a.id }}">Sender name <span class="hint">Drivers see this as who the email is from.</span></label>
+    <div class="field-row">
+      <input id="name-{{ a.id }}" name="display_name" value="{{ a.display_name }}" placeholder="Mike - ABC Logistics" maxlength="80"
+             class="{{ 'missing' if not a.display_name }}" {% if not a.display_name %}aria-describedby="name-err-{{ a.id }}"{% endif %}>
+      <button>Save name</button>
+    </div>
+    {% if not a.display_name %}<p class="bad-text small-text" id="name-err-{{ a.id }}">This account can't send until it has a sender name.</p>{% endif %}
+  </form>
+
+  <details class="inline-details" {% if a.state == 'disabled' %}open{% endif %}>
+    <summary>New App Password</summary>
+    <form method="post" action="/settings/accounts/{{ a.id }}/password" class="field-row">
+      <input name="app_password" type="password" placeholder="16 letters" required autocomplete="new-password" aria-label="New App Password for {{ a.email }}">
+      <button class="primary" data-busy="Testing…">Save and test</button>
+    </form>
+  </details>
+
+  <div class="acc-actions">
+    <button type="button" data-test-account="{{ a.id }}">Test connection</button>
+    {% if a.state in ('paused', 'disabled') %}
+    <form method="post" action="/settings/accounts/{{ a.id }}/reenable" class="inline"><button data-busy="Testing…">Turn back on now</button></form>
+    {% endif %}
+    <form method="post" action="/settings/accounts/{{ a.id }}/delete" class="inline push-right" onsubmit="return confirm('Remove {{ a.email }}? It stops sending right away. Campaigns continue with the other accounts.')"><button class="danger">Remove</button></form>
+  </div>
+  <p class="test-result" id="test-{{ a.id }}" role="status"></p>
+</li>
+{% endfor %}
+</ul>
+{% endif %}
+
+<section class="card" id="add" aria-labelledby="add-h">
+  <h2 id="add-h">{{ 'Add another account' if accounts else 'Add your first Gmail account' }}</h2>
+  <p class="muted">The tool checks that it can send and read replies before saving. The App Password is stored encrypted.</p>
+  <form method="post" action="/settings/accounts/add" class="stack-form">
+    <label>Gmail address <input name="email" type="email" placeholder="name@gmail.com" required autocomplete="off"></label>
+    <label>Sender name <span class="hint">A real person's name works best, e.g. “Mike - ABC Logistics”.</span>
+      <input name="display_name" placeholder="Mike - ABC Logistics" maxlength="80" required></label>
+    <label>App Password <span class="hint">16 letters from Google — not the normal Gmail password.</span>
+      <input name="app_password" type="password" placeholder="xxxx xxxx xxxx xxxx" required autocomplete="new-password"></label>
+    {% if dry_run %}<label class="check"><input type="checkbox" name="skip_test" value="1"> Skip the connection test (dry run only)</label>{% endif %}
+    <div class="controls"><button class="primary" data-busy="Testing the account…">Add and test</button></div>
+  </form>
+
+  <details class="howto" {% if not accounts %}open{% endif %}>
+    <summary>How to get an App Password</summary>
+    <ol>
+      <li>Sign in to the Gmail account in your browser and open <b>myaccount.google.com/security</b>.</li>
+      <li>Turn on <b>2-Step Verification</b> (Google asks for a phone number).</li>
+      <li>Open <b>myaccount.google.com/apppasswords</b>, type the name <b>Wayflix Trucking Email Sender</b> and click <b>Create</b>.</li>
+      <li>Copy the 16-letter password Google shows (it is shown only once) and paste it above.</li>
+    </ol>
+    <p class="muted small-text">If you later change this Gmail's normal password, Google cancels its App Passwords. The account then shows as Stopped here; create a new App Password and paste it under “New App Password”.</p>
+  </details>
+</section>
+{% endblock %}

@@ -4,6 +4,12 @@
 <div class="card empty">
   <h1>Something isn't right</h1>
   <p>{{ message }}</p>
-  <a class="button primary" href="/">Back to campaigns</a>
+  {% if details %}<details class="tech"><summary>Technical details</summary><code>{{ details }}</code></details>{% endif %}
+  <div class="controls center">
+    <a class="button primary" href="/">Back to campaigns</a>
+    {% if delete_draft %}
+    <form method="post" action="/campaigns/{{ delete_draft }}/delete" class="inline" onsubmit="return confirm('Delete this draft? Nothing has been sent.')"><button class="danger">Delete this draft</button></form>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

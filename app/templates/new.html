@@ -1,35 +1,48 @@
 {% extends "base.html" %}
 {% block title %}New campaign · Wayflix Trucking Email Sender{% endblock %}
 {% block content %}
-<h1>New campaign</h1>
+<div class="page-head"><div><h1>New campaign</h1></div></div>
 {% set step = 1 %}{% include "_steps.html" %}
 
+{% if not can_send %}
+<div class="alert amber"><span>No Gmail account can send yet. You can prepare the campaign now, but you'll need an account to start it.</span>
+  <a class="button small" href="/accounts#add">Add Gmail account</a></div>
+{% endif %}
+
 <form id="new-form" method="post" action="/campaigns/new" enctype="multipart/form-data" class="card">
-  <label>Campaign name <span class="hint" style="display:inline">(optional)</span>
-    <input name="name" placeholder="e.g. Dry van OTR – November" maxlength="120"></label>
-
-  <h2>Excel or CSV file</h2>
-  <div id="fsa-box" hidden>
-    <button type="button" id="pick-file">Choose Excel or CSV file…</button>
-    <p class="muted small-text">The tool will write the results back into this same file on your computer.</p>
+  <h2>Which drivers?</h2>
+  <div class="source-choice">
+    <div class="source">
+      <h3>Excel or CSV file</h3>
+      <div id="fsa-box" hidden>
+        <button type="button" id="pick-file">Choose file…</button>
+        <p class="muted small-text">When your browser asks, allow editing: the tool then writes the results into this same file.</p>
+      </div>
+      <div id="plain-file">
+        <input type="file" name="file" accept=".xlsx,.xlsm,.csv" aria-label="Excel or CSV file">
+        <p class="muted small-text">You'll download a copy with the results at the end. (In Chrome or Edge the tool can write into the original file.)</p>
+      </div>
+      <p id="picked" class="ok-text" role="status"></p>
+    </div>
+    <div class="source-or" aria-hidden="true">or</div>
+    <div class="source">
+      <h3>Google Sheet</h3>
+      {% if sa_email %}
+      <label>Link to the sheet <span class="hint">Copy it from the address bar while the sheet is open.</span>
+        <input name="sheet_url" type="url" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
+      <p class="muted small-text">The sheet must be shared with <code>{{ sa_email }}</code> as Editor.</p>
+      {% else %}
+      <p class="muted small-text">Not connected yet. <a href="/settings#sheets">How to connect Google Sheets</a></p>
+      {% endif %}
+    </div>
   </div>
-  <div id="plain-file">
-    <input type="file" name="file" accept=".xlsx,.xlsm,.csv">
-    <p class="muted small-text">This browser can't write back to the original file, so you'll get a “Download marked copy” button instead. Chrome and Edge can write into the original.</p>
-  </div>
-  <p id="picked" class="ok-text" role="status"></p>
 
-  <h2>Or a Google Sheet</h2>
-  {% if sa_email %}
-  <label>Sheet link <span class="hint">Copy it from the browser address bar while the sheet is open.</span>
-    <input name="sheet_url" type="url" placeholder="https://docs.google.com/spreadsheets/d/…"></label>
-  <p class="muted small-text">The sheet must be shared with <code>{{ sa_email }}</code> as Editor.</p>
-  {% else %}
-  <p class="muted">Google Sheets isn't set up yet. See <a href="/settings#sheets">Settings → Google Sheets</a>.</p>
-  {% endif %}
+  <label>Campaign name <span class="hint">Optional. Helps you find it later, e.g. “Dry van OTR – November”. Empty = the file name.</span>
+    <input name="name" maxlength="120"></label>
 
-  <div class="controls" style="margin-top:20px">
-    <button class="primary" id="next-btn">Next: check columns</button>
+  <div class="controls">
+    <button class="primary" id="next-btn" data-busy="Reading the list…">Next: check columns</button>
+    <a href="/" class="small-text">Cancel</a>
   </div>
   <p id="new-error" class="bad-text" role="alert"></p>
 </form>

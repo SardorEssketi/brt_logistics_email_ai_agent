@@ -1,73 +1,106 @@
 {% extends "base.html" %}
 {% block content %}
-{% if not accounts %}
-<div class="alert amber"><span>No Gmail account yet, so nothing can be sent. <a href="/settings#accounts">Add one in Settings</a>.</span></div>
-{% endif %}
-
-{% for a in alerts %}
-<div class="alert {{ 'red' if a.level == 'error' else 'amber' }}">
-  <span><span class="when">{{ fmt_ct(a.ts) }}</span>{{ a.message }}</span>
-  <form method="post" action="/alerts/{{ a.id }}/dismiss" class="inline"><input type="hidden" name="back" value="/"><button class="link">Dismiss</button></form>
-</div>
-{% endfor %}
-
-<div class="row-between">
-  <h1>Campaigns</h1>
+<div class="page-head">
+  <div>
+    <h1>Campaigns</h1>
+    <p class="sub">Each campaign emails one driver list, one driver at a time, from your Gmail accounts.</p>
+  </div>
   <a class="button primary" href="/campaigns/new">New campaign</a>
 </div>
 
+{% if setup %}
+<section class="card setup" aria-labelledby="setup-h">
+  <h2 id="setup-h">Get ready to send</h2>
+  <p class="muted">Do step 1 before your first campaign. It takes about 5 minutes per Gmail account.</p>
+  <ol class="checklist">
+    {% for s in setup %}
+    <li class="{{ 'done' if s.done }}">
+      <span class="mark" aria-hidden="true">{{ '✓' if s.done else loop.index }}</span>
+      <div>
+        <b>{{ s.title }}</b>{% if s.done %} <span class="sr-only">(done)</span>{% endif %}
+        <p class="muted small-text">{{ s.text }}</p>
+      </div>
+      {% if not s.done %}<a class="button {{ 'primary' if loop.first }}" href="{{ s.url }}">{{ s.label }}</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
+{% if attention %}
+<section aria-labelledby="att-h">
+  <h2 id="att-h">Needs your attention</h2>
+  <ul class="attention">
+    {% for a in attention %}
+    <li class="att {{ a.level }}"><span>{{ a.text }}</span><a class="button small" href="{{ a.url }}">{{ a.label }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if campaigns %}
-<div class="list-table scroll">
-<table class="grid">
-  <thead><tr><th>Campaign</th><th>Status</th><th class="n">Sent</th><th class="n">Remaining</th><th class="n">Replies</th><th class="n">Bounces</th><th class="n">Unsubscribes</th><th>Created</th></tr></thead>
-  <tbody>
+{% if attention or setup %}<h2>Your campaigns</h2>{% endif %}
+<ul class="camp-list" aria-label="Campaigns">
   {% for c in campaigns %}
   {% set draft = c.status == 'draft' %}
-  <tr>
-    <td><a class="camp-name" href="{{ c.link }}">{{ c.name or ('Campaign ' ~ c.id) }}</a>{% if c.dry_run %} <span class="tag">dry run</span>{% endif %}</td>
-    <td><span class="status {{ c.status }}">{{ c.status }}</span>{% if draft %}<span class="status-note">{{ c.draft_step }}</span>{% endif %}</td>
+  <li class="camp-row {{ 'needs' if c.needs_you }}">
+    <div class="camp-main">
+      <a class="camp-name" href="{{ c.link }}">{{ c.name or ('Campaign ' ~ c.id) }}</a>
+      <span class="status {{ c.status }}">{{ status_labels[c.status] }}</span>
+      {% if c.dry_run %}<span class="tag">dry run</span>{% endif %}
+      <div class="camp-meta">
+        {% if draft %}Setup not finished — {{ c.draft_step }}
+        {% else %}Created {{ fmt_ct(c.created_at) }}{% endif %}
+      </div>
+    </div>
     {% if draft %}
-    <td class="n zero" colspan="5" style="text-align:left"><a href="{{ c.link }}">Continue setup</a></td>
+    <a class="button" href="{{ c.link }}">Continue setup</a>
     {% else %}
-    {% for k in ('sent', 'remaining', 'replies', 'bounces', 'unsubs') %}
-    <td class="n {{ 'zero' if not c[k] }}">{{ c[k] }}</td>
-    {% endfor %}
+    <div class="camp-progress">
+      <div class="bar" aria-hidden="true"><i style="width: {{ c.pct }}%"></i></div>
+      <div class="camp-nums">
+        <span><b>{{ c.sent }}</b> of {{ c.sent + c.remaining }} sent</span>
+        <span><b>{{ c.replies }}</b> {{ 'reply' if c.replies == 1 else 'replies' }}</span>
+        <span><b>{{ c.bounces }}</b> bounced</span>
+        <span><b>{{ c.unsubs }}</b> unsubscribed</span>
+      </div>
+    </div>
     {% endif %}
-    <td style="white-space:nowrap">{{ fmt_ct(c.created_at) }}</td>
-  </tr>
+  </li>
   {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
+</ul>
+{% elif not setup %}
 <div class="card empty">
   <h2>No campaigns yet</h2>
-  <p class="muted">Pick a driver list (Excel, CSV or Google Sheet), write the message, and the tool sends it slowly from your Gmail accounts.</p>
+  <p class="muted">Choose a driver list (Excel, CSV or Google Sheet), write the message, check it, and start. The tool sends slowly and safely in the background.</p>
   <a class="button primary" href="/campaigns/new">Start your first campaign</a>
 </div>
 {% endif %}
 
-<div class="row-between">
-  <h2>Gmail accounts</h2>
-  <a href="/settings#accounts" class="small-text">Manage accounts</a>
-</div>
 {% if accounts %}
-<div class="list-table scroll">
-<table class="grid">
-  <thead><tr><th>Account</th><th class="n">Sent (last 24 h)</th><th class="n">Daily cap</th><th>State</th></tr></thead>
-  <tbody>
-  {% for a in accounts %}
-  <tr><td><b>{{ a.display_name or '(no sender name)' }}</b><br><span class="muted small-text">{{ a.email }}</span></td>
-    <td class="n">{{ a.sent_24h }}</td><td class="n">{{ a.cap }}</td>
-    <td>{% if a.state == 'ok' %}<span class="status running">Ready</span>
-      {% elif a.state == 'paused' %}<span class="status paused">Resting</span><span class="status-note">until {{ a.paused_until_ct }}</span>
-      {% elif a.state == 'no_name' %}<span class="status stopped">Blocked</span><span class="status-note">No sender name. <a href="/settings#accounts">Add one</a></span>
-      {% else %}<span class="status stopped">Stopped</span><span class="status-note">{{ a.disabled_reason }}</span>{% endif %}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
-{% else %}
-<p class="muted">None yet.</p>
+<section class="acc-summary" aria-labelledby="acc-h">
+  <div class="row-between">
+    <h2 id="acc-h">Gmail accounts</h2>
+    <a href="/accounts" class="small-text">Manage accounts</a>
+  </div>
+  <p class="muted small-text">{{ sent_24h }} of {{ capacity }} daily emails used (rolling 24 hours, all accounts that can send).</p>
+  <ul class="acc-mini">
+    {% for a in accounts %}
+    <li><span class="dot {{ a.state }}" aria-hidden="true"></span>
+      <span class="acc-mini-name">{{ a.display_name or a.email }}</span>
+      <span class="muted small-text">{{ account_state_labels[a.state] }}{% if a.state == 'paused' %} until {{ a.paused_until_ct }}{% endif %}<span class="sep">·</span>{{ a.sent_24h }} of {{ a.cap }} today</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if alerts %}
+<details class="activity">
+  <summary>Recent activity ({{ alerts|length }})</summary>
+  <ul>
+    {% for a in alerts %}<li class="{{ 'red' if a.level == 'error' else 'amber' }}"><span class="when">{{ fmt_ct(a.ts) }}</span> {{ a.message }}</li>{% endfor %}
+  </ul>
+  <form method="post" action="/alerts/dismiss-all"><input type="hidden" name="back" value="/"><button class="small">Clear all</button></form>
+</details>
 {% endif %}
 {% endblock %}

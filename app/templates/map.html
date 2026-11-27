@@ -1,63 +1,64 @@
 {% extends "base.html" %}
 {% block title %}Columns · Wayflix Trucking Email Sender{% endblock %}
 {% block content %}
-<h1>{{ camp.name or 'New campaign' }}</h1>
+<div class="page-head"><div><h1>{{ camp.name or 'New campaign' }}</h1>
+  <p class="sub">{{ camp.original_name }}<span class="sep">·</span>{{ data_rows }} rows with data</p></div></div>
 {% set step = 2 %}{% include "_steps.html" %}
-<p class="muted">List: <b>{{ camp.original_name }}</b> · {{ data_rows }} data rows</p>
 
-<form method="get" class="card form-row">
+{# Tab / title row: changing them reloads the page (the columns depend on them). Nothing else is on this form, so no choices are lost. #}
+<form method="get" class="card form-row" id="where-form">
   {% if tabs|length > 1 %}
-  <label>Tab
+  <label>Sheet tab
     <select name="tab" onchange="this.form.submit()">
       {% for t in tabs %}<option {% if t == tab %}selected{% endif %}>{{ t }}</option>{% endfor %}
     </select></label>
   {% else %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}
-  <label>Which row has the column titles?
+  <label>Column titles are in
     <select name="header_row" onchange="this.form.submit()">
-      {% for i in range(1, 11) %}<option value="{{ i }}" {% if i == header_row %}selected{% endif %}>Row {{ i }}{% if i == detected_row %} (detected automatically){% endif %}</option>{% endfor %}
+      {% for i in range(1, 11) %}<option value="{{ i }}" {% if i == header_row %}selected{% endif %}>row {{ i }}{% if i == detected_row %} (found automatically){% endif %}</option>{% endfor %}
     </select></label>
   <noscript><button>Reload</button></noscript>
-  {% if not detected_row %}<p class="bad-text" style="flex-basis:100%">No email column title found in the first 10 rows. Choose the title row and the email column yourself.</p>{% endif %}
+  {% if not detected_row %}<p class="bad-text" style="flex-basis:100%">No email column title was found in the first 10 rows. Choose the title row, then the email column.</p>{% endif %}
 </form>
 
 <form method="post" class="card">
   <input type="hidden" name="tab" value="{{ tab }}">
   <input type="hidden" name="header_row" value="{{ header_row }}">
   <h2>What is in each column?</h2>
-  <p class="muted">Filled in automatically. Check it before going on.</p>
-  <div class="scroll">
-  <table class="grid compact">
-    {% for f in fields %}
+  <p class="muted">Filled in automatically — just check it.</p>
+
+  {% macro field(f, required=False) %}
     {% set chosen = mapping.get(f) %}
     {% set needs = (f == 'email' and not chosen) or (f == 'name' and not mapping.get('name') and not mapping.get('first_name')) %}
-    <tr class="{{ 'needs' if needs else '' }}">
-      <td style="width:40%"><label for="col_{{ f }}" style="margin:6px 0 0"><b>{{ labels[f] }}</b></label>
-        {% if f == 'email' %}<span class="tag red">required</span>{% endif %}
-        {% if f == 'name' %}<span class="tag">required, or First name</span>{% endif %}
-      </td>
-      <td>
-        <select name="col_{{ f }}" id="col_{{ f }}" style="margin:0">
-          <option value="">{% if needs %}Choose a column…{% else %}None{% endif %}</option>
-          {% for i in range(1, width + 1) %}
-          <option value="{{ i }}" {% if chosen == i %}selected{% endif %}>Column {{ col_letter(i) }}: {{ header[i-1] if i <= header|length and header[i-1] else '(no title)' }}</option>
-          {% endfor %}
-        </select>
-        {% if chosen %}<span class="ok-text small-text">Detected automatically</span>{% elif needs %}<span class="bad-text small-text">Not found. Choose the column.</span>{% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-  </div>
-  {% if not mapping.get('notes') %}
-  <p class="alert amber">No NOTES column found. A new NOTES column will be added in column {{ col_letter(notes_new_col) }}, the first completely empty column. No other column is changed.</p>
-  {% endif %}
+    <div class="map-field {{ 'needs' if needs }}">
+      <label for="col_{{ f }}">{{ labels[f] }}
+        {% if f == 'name' %}<span class="hint">Or choose First name below.</span>{% endif %}
+        {% if f == 'notes' %}<span class="hint">Results (“Sent 11/18/2026”…) are added here.</span>{% endif %}</label>
+      <select name="col_{{ f }}" id="col_{{ f }}">
+        <option value="">{% if needs %}Choose a column…{% else %}Not in this list{% endif %}</option>
+        {% for i in range(1, width + 1) %}
+        <option value="{{ i }}" {% if chosen == i %}selected{% endif %}>{{ col_letter(i) }}: {{ header[i-1] if i <= header|length and header[i-1] else '(no title)' }}</option>
+        {% endfor %}
+      </select>
+      {% if chosen %}<span class="ok-text small-text">✓ Found automatically</span>{% elif needs %}<span class="bad-text small-text">Not found. Choose the column.</span>{% endif %}
+    </div>
+  {% endmacro %}
+
+  <h3 class="group-h">Needed</h3>
+  <div class="map-grid">{{ field('email') }}{{ field('name') }}</div>
   {% if not mapping.get('name') and not mapping.get('first_name') %}
   <label class="check"><input type="checkbox" name="no_name" value="1"> This list has no names (everyone gets “Hi there”)</label>
   {% endif %}
-  <label class="check"><input type="checkbox" name="skip_sent" value="1" {% if camp.skip_sent %}checked{% endif %}> Skip drivers whose NOTES already say Sent</label>
 
-  <h2>First rows of the list</h2>
-  <div class="scroll">
+  <h3 class="group-h">Optional</h3>
+  <div class="map-grid">{% for f in fields if f not in ('email', 'name') %}{{ field(f) }}{% endfor %}</div>
+  {% if not mapping.get('notes') %}
+  <p class="alert amber"><span>No NOTES column found. A new NOTES column will be added in column <b>{{ col_letter(notes_new_col) }}</b> (the first empty column). No other column is changed.</span></p>
+  {% endif %}
+  <label class="check"><input type="checkbox" name="skip_sent" value="1" {% if camp.skip_sent %}checked{% endif %}> Skip drivers whose NOTES already say “Sent”</label>
+
+  <h3 class="group-h">First rows of your list</h3>
+  <div class="scroll" tabindex="0" aria-label="First rows of the list">
   <table class="grid compact sheet">
     <tr><th></th>{% for i in range(1, width + 1) %}<th>{{ col_letter(i) }}</th>{% endfor %}</tr>
     <tr class="hdr"><th>{{ header_row }}</th>{% for i in range(1, width + 1) %}<td>{{ header[i-1] if i <= header|length else '' }}</td>{% endfor %}</tr>
@@ -66,10 +67,10 @@
     {% endfor %}
   </table>
   </div>
-  <div class="controls" style="margin-top:18px">
-    <button class="primary" data-busy="Checking emails…">Next: write the message</button>
-    <span class="muted small-text">Checking the email addresses can take up to a minute for big lists.</span>
+  <div class="controls">
+    <button class="primary" data-busy="Checking the email addresses…">Next: write the message</button>
+    <span class="muted small-text">Checking the addresses can take up to a minute for big lists.</span>
   </div>
 </form>
-<form method="post" action="/campaigns/{{ camp.id }}/delete" class="danger-zone" onsubmit="return confirm('Delete this draft?')"><button class="link danger">Delete draft</button></form>
+<form method="post" action="/campaigns/{{ camp.id }}/delete" class="danger-zone" onsubmit="return confirm('Delete this draft? Nothing has been sent.')"><button class="link danger">Delete this draft</button></form>
 {% endblock %}
