@@ -135,6 +135,51 @@ def alerts(c, campaign_id=None, limit=15):
     return [dict(r) for r in c.execute(q + " ORDER BY id DESC LIMIT ?", (*args, limit))]
 
 
+# Words people see for each campaign status (the database keeps the short names).
+STATUS_LABELS = {"draft": "Draft", "running": "Sending", "paused": "Paused", "stopped": "Stopped", "done": "Finished"}
+ACCOUNT_STATE_LABELS = {"ok": "Ready", "paused": "Resting", "no_name": "Needs sender name", "disabled": "Stopped"}
+templates.env.globals.update(status_labels=STATUS_LABELS, account_state_labels=ACCOUNT_STATE_LABELS)
+
+
+def attention_items(c, accounts=None) -> list:
+    """What needs a person right now, built from the CURRENT state (fixed things disappear by themselves).
+    Each item: level (red|amber), text, action label, action url."""
+    items = []
+    for a in accounts if accounts is not None else account_rows(c):
+        if a["state"] == "disabled":
+            items.append({"level": "red", "text": f"{a['email']} is stopped: {a['disabled_reason']}.",
+                          "label": "Fix account", "url": f"/accounts#acc-{a['id']}"})
+        elif a["state"] == "no_name":
+            items.append({"level": "red", "text": f"{a['email']} can't send until it has a sender name.",
+                          "label": "Add sender name", "url": f"/accounts#acc-{a['id']}"})
+    for camp in c.execute("SELECT id, name, status_reason FROM campaigns WHERE status='paused' "
+                          "AND status_reason LIKE 'Paused automatically%' ORDER BY id DESC"):
+        items.append({"level": "red", "text": f"“{camp['name'] or 'Campaign ' + str(camp['id'])}” paused itself. "
+                      + camp["status_reason"].replace("Paused automatically: ", "", 1),
+                      "label": "Review and resume", "url": f"/campaigns/{camp['id']}"})
+    for r in c.execute("SELECT m.campaign_id, COUNT(*) n, cp.name FROM marks m JOIN campaigns cp ON cp.id=m.campaign_id "
+                       "WHERE m.unmatched=1 GROUP BY m.campaign_id"):
+        items.append({"level": "amber", "text": f"{r['n']} note(s) for “{r['name']}” couldn't be written because the "
+                      "row was not found in the list.", "label": "See which", "url": f"/campaigns/{r['campaign_id']}#notes"})
+    return items
+
+
+def setup_steps(c, accounts) -> list:
+    """First-run checklist. Shown on the Campaigns page until an account can send."""
+    named = [a for a in accounts if a["state"] in ("ok", "paused")]
+    return [
+        {"done": bool(named), "title": "Add a Gmail account",
+         "text": "With its App Password and the sender name drivers will see. This is the only required step.",
+         "url": "/accounts#add", "label": "Add Gmail account"},
+        {"done": bool(db.get_setting(c, "test_inbox")), "title": "Set your test address (optional)",
+         "text": "Where “Send test” emails go, so you can see the email before drivers do.",
+         "url": "/settings#test-inbox", "label": "Set test address"},
+        {"done": bool(listio.service_account_email()), "title": "Connect Google Sheets (optional)",
+         "text": "Only needed if your driver lists are Google Sheets. Excel and CSV work without it.",
+         "url": "/settings#sheets", "label": "How to connect"},
+    ]
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     c = conn()
@@ -144,9 +189,16 @@ def dashboard(request: Request):
         d.update(outcomes.campaign_rates(c, camp["id"]))
         d["remaining"] = c.execute("SELECT COUNT(*) FROM recipients WHERE campaign_id=? AND status IN "
                                    "('queued','sending')", (camp["id"],)).fetchone()[0]
+        total = d["sent"] + d["remaining"]
+        d["pct"] = round(100 * d["sent"] / total) if total else 0
         d["link"], d["draft_step"] = _campaign_link(camp)
+        d["needs_you"] = camp["status"] == "paused"
         rows.append(d)
-    return page(request, "dashboard.html", campaigns=rows, alerts=alerts(c), accounts=account_rows(c))
+    accs = account_rows(c)
+    can_send = [a for a in accs if a["state"] in ("ok", "paused")]
+    return page(request, "dashboard.html", campaigns=rows, alerts=alerts(c), accounts=accs,
+                attention=attention_items(c, accs), setup=setup_steps(c, accs) if not can_send else None,
+                capacity=sum(a["cap"] for a in can_send), sent_24h=sum(a["sent_24h"] for a in accs))
 
 
 def _campaign_link(camp):
@@ -161,10 +213,30 @@ def _campaign_link(camp):
     return f"/campaigns/{cid}/map", "Step 2: columns"
 
 
+def _safe_back(back: str) -> str:
+    return back if back.startswith("/") and not back.startswith("//") else "/"
+
+
 @app.post("/alerts/{eid}/dismiss")
 def dismiss(eid: int, back: str = Form("/")):
     conn().execute("UPDATE events SET dismissed=1 WHERE id=?", (eid,))
-    return redirect(back if back.startswith("/") else "/")
+    return redirect(_safe_back(back))
+
+
+@app.post("/alerts/dismiss-all")
+def dismiss_all(back: str = Form("/"), campaign_id: str = Form("")):
+    c = conn()
+    if campaign_id.isdigit():
+        c.execute("UPDATE events SET dismissed=1 WHERE campaign_id=? OR campaign_id IS NULL", (int(campaign_id),))
+    else:
+        c.execute("UPDATE events SET dismissed=1")
+    return redirect(_safe_back(back), msg="Activity cleared.")
+
+
+# ------------------------------------------------------------------ accounts
+@app.get("/accounts", response_class=HTMLResponse)
+def accounts_page(request: Request):
+    return page(request, "accounts.html", accounts=account_rows(conn()))
 
 
 # ------------------------------------------------------------------ settings
@@ -185,11 +257,11 @@ def _test_account(email, password):
     try:
         smtp_send.test_login(email, password)
     except Exception as e:
-        problems.append(f"Sending (SMTP) failed: {e}")
+        problems.append(f"Sending emails failed: {e}")
     try:
         imap_util.test_imap(email, password)
     except Exception as e:
-        problems.append(f"Reading the inbox (IMAP) failed: {e}")
+        problems.append(f"Reading replies from the inbox failed: {e}")
     return problems
 
 
@@ -200,20 +272,20 @@ def account_add(email: str = Form(...), display_name: str = Form(""), app_passwo
     email = emails.normalize(email)
     pw = re.sub(r"\s+", "", app_password)
     if not email or not emails.is_valid_syntax(email):
-        return redirect("/settings", err="That email address doesn't look right.")
+        return redirect("/accounts", err="That email address doesn't look right.")
     if c.execute("SELECT 1 FROM accounts WHERE email=?", (email,)).fetchone():
-        return redirect("/settings", err=f"{email} is already added.")
+        return redirect("/accounts", err=f"{email} is already added.")
     if not (config.dry_run() and skip_test):
         problems = _test_account(email, pw)
         if problems:
-            return redirect("/settings", err=f"{email} was NOT added. " + " ".join(problems)
+            return redirect("/accounts", err=f"{email} was NOT added. " + " ".join(problems)
                             + " Check the App Password (16 letters) and that 2-Step Verification is on.")
     c.execute("INSERT INTO accounts(email,display_name,password_enc,added_at) VALUES(?,?,?,?)",
               (email, clean_sender_name(display_name), crypto.encrypt(pw), time.time()))
     if not clean_sender_name(display_name):
-        return redirect("/settings", err=f"{email} added and tested, but it won't send until you enter its "
+        return redirect("/accounts", err=f"{email} added and tested, but it won't send until you enter its "
                                          "sender name (shown in the inbox).")
-    return redirect("/settings", msg=f"{email} added and tested. It starts at the week-1 warm-up cap.")
+    return redirect("/accounts", msg=f"{email} added and tested. It starts at the week-1 warm-up cap.")
 
 
 def clean_sender_name(name: str) -> str:
@@ -226,8 +298,8 @@ def account_name(aid: int, display_name: str = Form("")):
     name = clean_sender_name(display_name)
     c.execute("UPDATE accounts SET display_name=? WHERE id=?", (name, aid))
     if not name:
-        return redirect("/settings", err="Sender name removed: this account will not send until it has one.")
-    return redirect("/settings", msg=f"Sender name saved: {name}")
+        return redirect("/accounts", err="Sender name removed: this account will not send until it has one.")
+    return redirect("/accounts", msg=f"Sender name saved: {name}")
 
 
 @app.post("/settings/accounts/{aid}/delete")
@@ -235,9 +307,9 @@ def account_delete(aid: int):
     c = conn()
     busy = c.execute("SELECT COUNT(*) FROM recipients WHERE account_id=? AND status='sending'", (aid,)).fetchone()[0]
     if busy:
-        return redirect("/settings", err="This account is sending right now. Pause campaigns first, then remove it.")
+        return redirect("/accounts", err="This account is sending right now. Pause campaigns first, then remove it.")
     c.execute("DELETE FROM accounts WHERE id=?", (aid,))
-    return redirect("/settings", msg="Account removed.")
+    return redirect("/accounts", msg="Account removed.")
 
 
 @app.post("/settings/accounts/{aid}/password")
@@ -247,10 +319,10 @@ def account_password(aid: int, app_password: str = Form(...)):
     pw = re.sub(r"\s+", "", app_password)
     problems = _test_account(a["email"], pw)
     if problems:
-        return redirect("/settings", err="New App Password not saved. " + " ".join(problems))
+        return redirect("/accounts", err="New App Password not saved. " + " ".join(problems))
     c.execute("UPDATE accounts SET password_enc=?, disabled_reason=NULL, paused_until=NULL, last_error=NULL WHERE id=?",
               (crypto.encrypt(pw), aid))
-    return redirect("/settings", msg=f"{a['email']}: new App Password saved and account re-enabled.")
+    return redirect("/accounts", msg=f"{a['email']}: new App Password saved and account re-enabled.")
 
 
 @app.post("/settings/accounts/{aid}/reenable")
@@ -259,9 +331,9 @@ def account_reenable(aid: int):
     a = c.execute("SELECT * FROM accounts WHERE id=?", (aid,)).fetchone()
     problems = _test_account(a["email"], crypto.decrypt(a["password_enc"])) if not config.dry_run() else []
     if problems:
-        return redirect("/settings", err=f"{a['email']} still fails: " + " ".join(problems))
+        return redirect("/accounts", err=f"{a['email']} still fails: " + " ".join(problems))
     c.execute("UPDATE accounts SET disabled_reason=NULL, paused_until=NULL, last_error=NULL WHERE id=?", (aid,))
-    return redirect("/settings", msg=f"{a['email']} re-enabled.")
+    return redirect("/accounts", msg=f"{a['email']} re-enabled.")
 
 
 @app.post("/api/accounts/{aid}/test")
@@ -274,14 +346,77 @@ def account_test(aid: int):
     return {"ok": not problems, "message": " ".join(problems) or "Sending and inbox reading both work."}
 
 
-@app.post("/settings/window")
-async def window_save(request: Request):
-    form = await request.form()
+def _parse_window(form):
+    """(window dict, None) or (None, error). Same rules as before the redesign."""
     days = sorted(int(d) for d in form.getlist("days") if str(d).isdigit() and 0 <= int(d) <= 6)
     start, end = form.get("start", "09:00"), form.get("end", "16:00")
     if not re.match(r"^\d\d:\d\d$", start) or not re.match(r"^\d\d:\d\d$", end) or start >= end:
-        return redirect("/settings", err="The start time must be before the end time.")
-    db.set_setting(conn(), "window", {"days": days, "start": start, "end": end})
+        return None, "The start time must be before the end time."
+    return {"days": days, "start": start, "end": end}, None
+
+
+def _parse_caps(c, form):
+    """((warm-up list, {account id: override or None}), None) or (None, error). Nothing is saved here."""
+    try:
+        warm = [int(form.get(f"w{i}")) for i in range(4)]
+    except (TypeError, ValueError):
+        return None, "Warm-up caps must be whole numbers."
+    if any(not 1 <= w <= caps.HARD_MAX for w in warm):
+        return None, f"Caps must be between 1 and {caps.HARD_MAX}."
+    overrides = {}
+    for a in c.execute("SELECT id FROM accounts").fetchall():
+        v = (form.get(f"cap_{a['id']}") or "").strip()
+        if v and (not v.isdigit() or not 1 <= int(v) <= caps.HARD_MAX):
+            return None, f"Caps must be between 1 and {caps.HARD_MAX}."
+        overrides[a["id"]] = int(v) if v else None
+    return (warm, overrides), None
+
+
+def _save_caps(c, warm, overrides) -> bool:
+    """Saves caps; True if any of them is above the risky level."""
+    db.set_setting(c, "warmup", warm)
+    for aid, v in overrides.items():
+        c.execute("UPDATE accounts SET cap_override=? WHERE id=?", (v, aid))
+    return max(warm + [v or 0 for v in overrides.values()]) > caps.RISKY_ABOVE
+
+
+RISKY_MSG = f"Saved — but a cap above {caps.RISKY_ABOVE}/day is a high risk of the free Gmail account being locked."
+
+
+def _parse_recent(v: str):
+    v = (v or "").strip()
+    if not v.isdigit() or not 0 <= int(v) <= 365:
+        return None, "Enter a number of days from 0 to 365 (0 turns the check off)."
+    return int(v), None
+
+
+@app.post("/settings/rules")
+async def rules_save(request: Request):
+    """One form for the sending window, daily caps and the repeat-email rule. Everything is checked first,
+    so a mistake in one field saves nothing (no half-saved settings)."""
+    form = await request.form()
+    c = conn()
+    window, err = _parse_window(form)
+    capv, err2 = _parse_caps(c, form)
+    days, err3 = _parse_recent(form.get("recent_days", ""))
+    errors = [e for e in (err, err2, err3) if e]
+    if errors:
+        return redirect("/settings#rules", err="Nothing was saved. " + " ".join(errors))
+    db.set_setting(c, "window", window)
+    risky = _save_caps(c, *capv)
+    db.set_setting(c, "recent_days", days)
+    if risky:
+        return redirect("/settings#rules", err=RISKY_MSG)
+    return redirect("/settings#rules", msg="Sending rules saved.")
+
+
+# The three forms below are the pre-redesign endpoints, kept so old bookmarks/scripts keep working.
+@app.post("/settings/window")
+async def window_save(request: Request):
+    window, err = _parse_window(await request.form())
+    if err:
+        return redirect("/settings", err=err)
+    db.set_setting(conn(), "window", window)
     return redirect("/settings", msg="Sending window saved.")
 
 
@@ -289,43 +424,32 @@ async def window_save(request: Request):
 async def caps_save(request: Request):
     form = await request.form()
     c = conn()
-    try:
-        warm = [int(form.get(f"w{i}")) for i in range(4)]
-    except (TypeError, ValueError):
-        return redirect("/settings", err="Warm-up caps must be whole numbers.")
-    if any(not 1 <= w <= caps.HARD_MAX for w in warm):
-        return redirect("/settings", err=f"Caps must be between 1 and {caps.HARD_MAX}.")
-    db.set_setting(c, "warmup", warm)
-    for a in c.execute("SELECT id FROM accounts").fetchall():
-        v = (form.get(f"cap_{a['id']}") or "").strip()
-        if v and (not v.isdigit() or not 1 <= int(v) <= caps.HARD_MAX):
-            return redirect("/settings", err=f"Caps must be between 1 and {caps.HARD_MAX}.")
-        c.execute("UPDATE accounts SET cap_override=? WHERE id=?", (int(v) if v else None, a["id"]))
-    risky = max(warm + [int(form.get(f"cap_{a['id']}") or 0) for a in c.execute("SELECT id FROM accounts")])
-    if risky > caps.RISKY_ABOVE:
-        return redirect("/settings", err=f"Saved — but a cap above {caps.RISKY_ABOVE}/day is a high risk of the free "
-                                         "Gmail account being locked.")
+    capv, err = _parse_caps(c, form)
+    if err:
+        return redirect("/settings", err=err)
+    if _save_caps(c, *capv):
+        return redirect("/settings", err=RISKY_MSG)
     return redirect("/settings", msg="Daily caps saved.")
 
 
 @app.post("/settings/recent-days")
 def recent_days_save(recent_days: str = Form("")):
-    v = recent_days.strip()
-    if not v.isdigit() or not 0 <= int(v) <= 365:
-        return redirect("/settings#repeat", err="Enter a number of days from 0 to 365 (0 turns the check off).")
-    db.set_setting(conn(), "recent_days", int(v))
-    msg = (f"Saved: drivers emailed by any campaign in the last {int(v)} days are skipped." if int(v)
+    v, err = _parse_recent(recent_days)
+    if err:
+        return redirect("/settings#rules", err=err)
+    db.set_setting(conn(), "recent_days", v)
+    msg = (f"Saved: drivers emailed by any campaign in the last {v} days are skipped." if v
            else "Saved: the repeat-email check is off.")
-    return redirect("/settings#repeat", msg=msg)
+    return redirect("/settings#rules", msg=msg)
 
 
 @app.post("/settings/test-inbox")
 def test_inbox_save(test_inbox: str = Form("")):
     e = emails.normalize(test_inbox)
     if test_inbox.strip() and not emails.is_valid_syntax(e):
-        return redirect("/settings", err="That email address doesn't look right.")
+        return redirect("/settings#test-inbox", err="That email address doesn't look right.")
     db.set_setting(conn(), "test_inbox", e)
-    return redirect("/settings", msg="Saved.")
+    return redirect("/settings#test-inbox", msg="Test address saved." if e else "Test address cleared.")
 
 
 @app.get("/settings/suppression.csv")
@@ -357,22 +481,24 @@ async def suppression_import(file: UploadFile = File(...)):
                 reason = "manual"
             db.suppress(c, e, reason, "imported")
             n += 1
-    return redirect("/settings", msg=f"Imported {n} address(es) into the do-not-email list.")
+    return redirect("/settings#suppression", msg=f"Imported {n} address(es) into the do-not-email list.")
 
 
 @app.post("/settings/suppression/add")
 def suppression_add(email: str = Form(...)):
     e = emails.normalize(email)
     if not e:
-        return redirect("/settings", err="That email address doesn't look right.")
+        return redirect("/settings#suppression", err="That email address doesn't look right.")
     db.suppress(conn(), e, "manual", "added by hand")
-    return redirect("/settings", msg=f"{e} will never be emailed.")
+    return redirect("/settings#suppression", msg=f"{e} will never be emailed.")
 
 
 # ------------------------------------------------------------------ new campaign
 @app.get("/campaigns/new", response_class=HTMLResponse)
 def new_campaign_page(request: Request):
-    return page(request, "new.html", sa_email=listio.service_account_email())
+    c = conn()
+    can_send = any(caps.account_state(a) in ("ok", "paused") for a in c.execute("SELECT * FROM accounts"))
+    return page(request, "new.html", sa_email=listio.service_account_email(), can_send=can_send)
 
 
 @app.post("/campaigns/new")
@@ -449,7 +575,11 @@ def map_page(request: Request, cid: int, tab: str = None, header_row: int = None
         tab = tab if tab in tabs else (camp["tab"] if camp["tab"] in tabs else tabs[0])
         grid = src.read(tab)
     except Exception as e:
-        return page(request, "error.html", message=f"Couldn't read the list: {e}")
+        log.warning("Couldn't read list for campaign %s: %r", cid, e)
+        msg = ("The driver list for this draft can't be opened. The file may have been removed from the server, "
+               "or the Google Sheet is no longer shared with the tool.")
+        return page(request, "error.html", message=msg, details=f"{type(e).__name__}: {str(e)[:300]}",
+                    delete_draft=cid)
     detected_row = columns.find_header_row(grid)
     if header_row is None:
         header_row = camp["header_row"] if camp["header_row"] and camp["tab"] == tab else (detected_row or 1)
@@ -525,6 +655,24 @@ async def api_check(request: Request):
     return checks.check_content(data.get("subject", ""), data.get("body", ""))
 
 
+@app.post("/api/campaigns/{cid}/preview")
+async def api_preview(request: Request, cid: int):
+    """Render the typed (unsaved) subject/body for the first driver who will get it. Read-only: saves nothing."""
+    c = conn()
+    _draft(c, cid)
+    data = await request.json()
+    r = c.execute("SELECT * FROM recipients WHERE campaign_id=? AND status='queued' ORDER BY row_num LIMIT 1",
+                  (cid,)).fetchone()
+    vars_ = _vars(r) if r else {"first_name": "", "name": "", "last_name": "", "position": ""}
+    unsub = compose.unsub_url(r["id"], r["email"]) if r else f"{config.public_base_url()}/u/…"
+    subject, text, _ = compose.render_parts(data.get("subject", ""), data.get("body", ""), vars_, unsub)
+    acc = next((a for a in c.execute("SELECT * FROM accounts ORDER BY id")
+                if caps.account_state(a) in ("ok", "paused")), None)
+    return {"subject": subject, "text": text, "to": (r["email"] if r else ""), "row": (r["row_num"] if r else None),
+            "name": (r["name"] if r else ""),
+            "from": f"{acc['display_name']} <{acc['email']}>" if acc else "(no Gmail account yet)"}
+
+
 def start_blockers(c, camp, summary=None) -> list:
     blockers = []
     accs = c.execute("SELECT * FROM accounts").fetchall()
@@ -563,9 +711,33 @@ def review_page(request: Request, cid: int):
         subject, text, _ = compose.render_parts(camp["subject"], camp["body"], _vars(r),
                                                 compose.unsub_url(r["id"], r["email"]))
         previews.append({"row": r["row_num"], "to": r["email"], "subject": subject, "text": text})
-    return page(request, "review.html", camp=camp, s=summ, previews=previews, blockers=start_blockers(c, camp, summ),
+    blockers = start_blockers(c, camp, summ)
+    usable = [a for a in c.execute("SELECT * FROM accounts") if caps.account_state(a) in ("ok", "paused")]
+    window = db.get_setting(c, "window")
+    return page(request, "review.html", camp=camp, s=summ, previews=previews, blockers=blockers,
+                account_blocked=not usable, n_accounts=len(usable), window_text=window_text(window),
                 sender=(f"{acc['display_name']} <{acc['email']}>" if acc else "(no Gmail account yet)"),
                 test_inbox=db.get_setting(c, "test_inbox"), check=checks.check_content(camp["subject"], camp["body"]))
+
+
+def window_text(window) -> str:
+    """'Mon–Fri, 9:00 AM–4:00 PM' (Central) for sentences on the page."""
+    days = window["days"]
+    names = timeutil.DAY_NAMES
+    if not days:
+        d = "no days selected"
+    elif days == list(range(days[0], days[-1] + 1)) and len(days) > 2:
+        d = f"{names[days[0]]}–{names[days[-1]]}"
+    else:
+        d = ", ".join(names[i] for i in days)
+
+    def t(hm):
+        h, m = map(int, hm.split(":"))
+        return f"{(h % 12) or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
+    return f"{d}, {t(window['start'])}–{t(window['end'])}"
+
+
+templates.env.globals["window_text"] = window_text
 
 
 @app.post("/campaigns/{cid}/fix-typos")
@@ -654,7 +826,7 @@ def progress_page(request: Request, cid: int):
     camp = _draft(c, cid)
     if camp["status"] == "draft":
         return RedirectResponse(f"/campaigns/{cid}/review", status_code=303)
-    return page(request, "progress.html", camp=camp)
+    return page(request, "progress.html", camp=camp, status_label=STATUS_LABELS.get(camp["status"], camp["status"]))
 
 
 @app.get("/api/campaigns/{cid}/stats")
@@ -672,7 +844,8 @@ def stats(cid: int):
     accs = []
     for a in account_rows(c, now):
         p = per_acc.get(a["id"], {})
-        accs.append({"email": a["email"], "state": a["state"], "sent_24h": a["sent_24h"], "cap": a["cap"],
+        accs.append({"id": a["id"], "email": a["email"], "name": a["display_name"], "state": a["state"],
+                     "state_label": ACCOUNT_STATE_LABELS[a["state"]], "sent_24h": a["sent_24h"], "cap": a["cap"],
                      "paused_until": a["paused_until_ct"], "disabled_reason": a["disabled_reason"],
                      "next_in": max(0, int((a["next_send_at"] or 0) - now)),
                      "sent": p.get("sent") or 0, "bounces": p.get("bounces") or 0, "unsubs": p.get("unsubs") or 0,
@@ -692,27 +865,78 @@ def stats(cid: int):
     total_marks = c.execute("SELECT COUNT(*) FROM marks WHERE campaign_id=?", (cid,)).fetchone()[0]
     last_err = c.execute("SELECT last_error FROM marks WHERE campaign_id=? AND written_at IS NULL AND last_error IS NOT "
                          "NULL ORDER BY id DESC LIMIT 1", (cid,)).fetchone()
-    red = []
-    if rates["sent"] >= 10 and rates["bounce_rate"] > outcomes.BOUNCE_LIMIT:
-        red.append(f"High bounce rate: {rates['bounce_rate']:.1%} (limit 3%).")
-    if rates["sent"] >= 10 and rates["unsub_rate"] > outcomes.UNSUB_LIMIT:
-        red.append(f"High unsubscribe rate: {rates['unsub_rate']:.1%} (limit 2%).")
-    for a in accs:
-        if a["state"] == "disabled":
-            red.append(f"{a['email']} is stopped: {a['disabled_reason']}. Fix it in Settings.")
-        elif a["state"] == "no_name":
-            red.append(f"{a['email']} is not sending: it has no sender name. Add one in Settings.")
+    # Rates: shown as a heads-up while running (the campaign pauses itself; thresholds live in core/outcomes.py).
+    warnings = []
+    if camp["status"] == "running":
+        if rates["sent"] >= 10 and rates["bounce_rate"] > outcomes.BOUNCE_LIMIT:
+            warnings.append(f"Bounce rate is {rates['bounce_rate']:.1%}. The campaign pauses itself above "
+                            f"{outcomes.BOUNCE_LIMIT:.0%} once {outcomes.BOUNCE_MIN} emails are sent.")
+        if rates["sent"] >= 10 and rates["unsub_rate"] > outcomes.UNSUB_LIMIT:
+            warnings.append(f"Unsubscribe rate is {rates['unsub_rate']:.1%}. The campaign pauses itself above "
+                            f"{outcomes.UNSUB_LIMIT:.0%} once {outcomes.UNSUB_MIN} emails are sent.")
+    stopped = [a for a in accs if a["state"] == "disabled"]
+    unnamed = [a for a in accs if a["state"] == "no_name"]
+    resting = [a for a in accs if a["state"] == "paused"]
+    usable = [a for a in accs if a["state"] in ("ok", "paused")]
+    acct_problem = "; ".join(p for p in (
+        f"{len(stopped)} account(s) stopped" if stopped else "",
+        f"{len(unnamed)} account(s) need a sender name" if unnamed else "") if p)
+    banner = _status_banner(camp, inside, nxt, accs, usable, resting, rates, by)
     return {
-        "status": camp["status"], "reason": camp["status_reason"], "dry_run": bool(camp["dry_run"]),
+        "status": camp["status"], "status_label": STATUS_LABELS.get(camp["status"], camp["status"]),
+        "reason": camp["status_reason"], "dry_run": bool(camp["dry_run"]),
         "sent": rates["sent"], "remaining": by.get("queued", 0) + by.get("sending", 0),
         "bounces": rates["bounces"], "unsubs": rates["unsubs"], "replies": rates["replies"],
         "errors": by.get("failed", 0), "skipped": by.get("skipped", 0),
-        "accounts": accs, "window": window_info, "red": red,
+        "accounts": accs, "window": window_info, "banner": banner, "warnings": warnings,
+        "account_problem": acct_problem, "next_email": _next_email_text(accs, inside, camp["status"]),
         "alerts": alerts(c, cid, 8),
         "marks": {"pending": pending, "total": total_marks, "unmatched": unmatched,
                   "last_error": last_err[0] if last_err else None},
         "estimate": campaigns.estimate_finish(c, by.get("queued", 0), now) if camp["status"] == "running" else None,
     }
+
+
+def _next_email_text(accs, inside, status) -> str:
+    waits = [a["next_in"] for a in accs if a["state"] == "ok"]
+    if status != "running" or not inside or not waits:
+        return ""
+    soon = min(waits)
+    return "Next email any moment now." if soon <= 30 else f"Next email in about {max(1, round(soon / 60))} min."
+
+
+def _status_banner(camp, inside, nxt, accs, usable, resting, rates, by) -> dict:
+    """One sentence that says what is happening and whether the user needs to act. tone: green|amber|red|grey."""
+    st = camp["status"]
+    if st == "done":
+        return {"tone": "green", "title": "Finished", "text": "Every driver on the list was handled."}
+    if st == "stopped":
+        return {"tone": "grey", "title": "Stopped", "text": "Drivers not yet emailed will not be emailed by this campaign."}
+    if st == "paused":
+        auto = (camp["status_reason"] or "").startswith("Paused automatically")
+        text = (camp["status_reason"] or "").replace("Paused automatically: ", "", 1) if auto else \
+            "Nothing is sent until you press Resume."
+        return {"tone": "red" if auto else "amber", "title": "Paused automatically" if auto else "Paused by you",
+                "text": text}
+    # running
+    if not by.get("queued", 0) and by.get("sending", 0):
+        return {"tone": "green", "title": "Almost done", "text": "The last emails are being confirmed."}
+    if not usable:
+        return {"tone": "red", "title": "Not sending",
+                "text": "No Gmail account can send right now. Fix the accounts below; sending continues by itself."}
+    if config.dry_run_fast():
+        return {"tone": "green", "title": "Sending (fast demo)", "text": "Dry run: the window and gaps are ignored."}
+    if not inside:
+        when = (f"{nxt:%a %m/%d at %I:%M %p} CT ({nxt.astimezone(timeutil.TASHKENT):%H:%M} Tashkent)" if nxt
+                else None)
+        return {"tone": "amber", "title": "Waiting for the sending window",
+                "text": f"Sending starts again {when}." if when else
+                "No sending days are selected. Choose days under Settings → Sending rules."}
+    if len(resting) == len(usable):
+        return {"tone": "amber", "title": "Accounts are resting",
+                "text": "Every account is resting after a Gmail limit and starts again by itself."}
+    return {"tone": "green", "title": "Sending now",
+            "text": "One email at a time from each account, 1.5–5 minutes apart. You can close this page."}
 
 
 @app.post("/campaigns/{cid}/pause")
@@ -739,19 +963,34 @@ def stop(cid: int):
     return redirect(f"/campaigns/{cid}")
 
 
+def _log_status(r) -> str:
+    """One readable status per row; the latest outcome wins (unsubscribed > replied > bounced > sent)."""
+    d = timeutil.us_date
+    if r["unsubscribed_at"]:
+        return f"Unsubscribed {d(r['unsubscribed_at'])}"
+    if r["replied_at"]:
+        return f"Replied {d(r['replied_at'])}"
+    if r["bounced_at"]:
+        return f"Bounced {d(r['bounced_at'])}"
+    if r["status"] == "sent":
+        return f"Sent {d(r['sent_at'])}" if r["sent_at"] else "Sent"
+    if r["status"] == "skipped":
+        return f"Not sent - {SKIP_LABELS.get(r['skip_reason'], r['skip_reason'] or 'skipped')}"
+    if r["status"] == "failed":
+        return f"Failed - {r['error']}" if r["error"] else "Failed"
+    if r["status"] == "sending":
+        return "Sending"
+    return "Waiting"
+
+
 @app.get("/campaigns/{cid}/log.csv")
 def log_csv(cid: int):
     c = conn()
-    accs = {a["id"]: a["email"] for a in c.execute("SELECT id,email FROM accounts")}
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["row", "email", "name", "status", "skip reason", "sent from", "sent at (CT)", "bounced", "replied",
-                "unsubscribed", "error"])
+    w.writerow(["row", "email", "name", "status"])
     for r in c.execute("SELECT * FROM recipients WHERE campaign_id=? ORDER BY row_num", (cid,)):
-        w.writerow([r["row_num"], r["email"] or r["raw_email"], r["name"], r["status"],
-                    SKIP_LABELS.get(r["skip_reason"], r["skip_reason"] or ""), accs.get(r["account_id"], ""),
-                    timeutil.fmt_central(r["sent_at"]), timeutil.fmt_central(r["bounced_at"]),
-                    timeutil.fmt_central(r["replied_at"]), timeutil.fmt_central(r["unsubscribed_at"]), r["error"] or ""])
+        w.writerow([r["row_num"], r["email"] or r["raw_email"], r["name"], _log_status(r)])
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="campaign-{cid}-log.csv"'})
 

@@ -1,34 +1,48 @@
 {% extends "base.html" %}
-{% block title %}Message · Driver Outreach{% endblock %}
+{% block title %}Message · Wayflix Trucking Email Sender{% endblock %}
 {% block content %}
-<h1>{{ camp.name or 'New campaign' }}</h1>
+<div class="page-head"><div><h1>{{ camp.name or 'New campaign' }}</h1></div></div>
 {% set step = 3 %}{% include "_steps.html" %}
 
 <div class="two-col">
 <form method="post" class="card" id="compose-form">
+  <h2>Write the message</h2>
   <label>Subject <input name="subject" id="subject" value="{{ camp.subject }}" maxlength="150" placeholder="CDL-A dry van, $0.65 CPM, home weekly" required></label>
-  <label>Message <span class="hint">Plain text. Paste the full message, including your signature, company details and address.</span>
+  <label>Message <span class="hint">Plain text. Paste the whole message, including your signature, company name, MC/DOT, phone and address.</span>
     <textarea name="body" id="body" rows="16" required placeholder="Hi {first_name},&#10;&#10;…">{{ camp.body }}</textarea></label>
-  <p class="muted small-text">The tool adds one line at the bottom: “Not interested? Reply 'unsubscribe' or click: &lt;link&gt;”. Attachments and images aren't supported.</p>
+  <div class="placeholder-bar">
+    <span class="small-text muted">Insert:</span>
+    {% for k, v in placeholders.items() %}<button type="button" class="chip" data-insert="{{ '{' ~ k ~ '}' }}" title="{{ v }}">{{ '{' ~ k ~ '}' }}</button>{% endfor %}
+    <span class="small-text muted" id="word-count">{{ check.words }} words</span>
+  </div>
+  <details class="howto"><summary>What do the placeholders do?</summary>
+    <ul class="placeholders">{% for k, v in placeholders.items() %}<li><code>{{ '{' ~ k ~ '}' }}</code> — {{ v }}</li>{% endfor %}</ul>
+  </details>
+  <p class="muted small-text">The tool adds only one line at the bottom: “Not interested? Reply 'unsubscribe' or click: &lt;link&gt;”. No attachments or images.</p>
   <div class="controls">
-    <button class="primary" id="compose-next">Save and preview</button>
-    <span class="muted small-text" id="word-count">{{ check.words }} words</span>
+    <button class="primary" id="compose-next">Save and continue</button>
+    <a class="small-text" href="/campaigns/{{ camp.id }}/map">Back to columns</a>
   </div>
 </form>
 
-<aside class="card">
-  <h2>Content check</h2>
-  <div id="check-out" aria-live="polite">
-    {% for b in check.blocks %}<div class="alert red">{{ b }}</div>{% endfor %}
-    {% for w in check.warnings %}<div class="alert amber">{{ w }}</div>{% endfor %}
-  </div>
-  <p class="tip small-text">Drivers answer specific offers: pay (CPM or weekly, or % for owner-operators), home time, lanes, equipment.</p>
-  <h2>Placeholders</h2>
-  <p class="muted small-text">Click one to insert it where the cursor is. Each driver gets their own value.</p>
-  <ul class="placeholders">
-    {% for k, v in placeholders.items() %}<li><button type="button" class="chip" data-insert="{{ '{' ~ k ~ '}' }}">{{ '{' ~ k ~ '}' }}</button> {{ v }}</li>{% endfor %}
-  </ul>
+<aside>
+  <section class="card email-preview live" aria-labelledby="pv-h">
+    <h2 id="pv-h" class="pv-title">Preview <span class="muted small-text" id="pv-who"></span></h2>
+    <div class="hdrs">
+      <div><b>From</b> <span id="pv-from">…</span></div>
+      <div><b>Subject</b> <span id="pv-subject">…</span></div>
+    </div>
+    <pre id="pv-text" aria-live="off"></pre>
+  </section>
+  <section class="card" aria-labelledby="chk-h">
+    <h2 id="chk-h">Content check</h2>
+    <div id="check-out" aria-live="polite">
+      {% for b in check.blocks %}<div class="alert red">{{ b }}</div>{% endfor %}
+      {% for w in check.warnings %}<div class="alert amber">{{ w }}</div>{% endfor %}
+    </div>
+    <p class="tip small-text">Drivers answer specific offers: pay (CPM or weekly, or % for owner-operators), home time, lanes, equipment.</p>
+  </section>
 </aside>
 </div>
 {% endblock %}
-{% block scripts %}<script>initCompose();</script>{% endblock %}
+{% block scripts %}<script>initCompose({{ camp.id }});</script>{% endblock %}

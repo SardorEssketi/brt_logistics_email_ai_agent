@@ -3,26 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Driver Outreach{% endblock %}</title>
+<title>{% block title %}Wayflix Trucking Email Sender{% endblock %}</title>
 <link rel="preload" href="/static/fonts/overpass-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css?v={{ static_v }}">
 </head>
 <body>
 {% set path = request.url.path %}
-{% set section = 'settings' if path.startswith('/settings') else ('new' if path == '/campaigns/new' else 'campaigns') %}
+{% set section = 'settings' if path.startswith('/settings') else ('accounts' if path.startswith('/accounts') else 'campaigns') %}
+<a class="skip-link" href="#main">Skip to content</a>
 <header class="top">
   <div class="top-inner">
-    <a class="brand" href="/">Driver Outreach</a>
+    <a class="brand" href="/">{% include "_truck.html" %}<span>Wayflix Trucking Email Sender</span></a>
     <nav aria-label="Main">
       <a href="/" {% if section == 'campaigns' %}aria-current="page"{% endif %}>Campaigns</a>
-      <a href="/campaigns/new" {% if section == 'new' %}aria-current="page"{% endif %}>New campaign</a>
+      <a href="/accounts" {% if section == 'accounts' %}aria-current="page"{% endif %}>Gmail accounts</a>
       <a href="/settings" {% if section == 'settings' %}aria-current="page"{% endif %}>Settings</a>
       <form method="post" action="/logout" class="inline"><button class="link">Log out</button></form>
     </nav>
   </div>
 </header>
-{% if dry_run %}<div class="banner dry"><b>Dry run:</b> campaign emails are saved as files on the server, not sent. Notes are still written to the list. “Send test” emails to your own address are really sent.</div>{% endif %}
-<main>
+{% if dry_run %}<div class="banner dry"><b>Dry run</b> — campaign emails are saved, not sent. Test emails to yourself are real.</div>{% endif %}
+<main id="main" tabindex="-1">
   {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
   {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
   {% block content %}{% endblock %}

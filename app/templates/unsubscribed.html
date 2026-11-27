@@ -4,13 +4,13 @@
 <meta name="robots" content="noindex">
 <title>Unsubscribe</title><link rel="stylesheet" href="/static/app.css?v={{ static_v }}"></head>
 <body class="center">
-<div class="card narrow">
+<main class="card narrow public">
 {% if state == 'confirm' %}
   <h1>Unsubscribe?</h1>
   <p>Click the button and we won't email you again.</p>
   <form method="post" action="/u/{{ token }}">
     <input type="hidden" name="confirm" value="1">
-    <button class="primary big" style="width:100%">Confirm unsubscribe</button>
+    <button class="primary big full">Confirm unsubscribe</button>
   </form>
 {% elif state in ('ok', 'already') %}
   <h1>You're unsubscribed</h1>
@@ -22,6 +22,6 @@
   <h1>Link not valid</h1>
   <p>This unsubscribe link is broken or incomplete. Reply to our email with the word “unsubscribe” and we'll remove you.</p>
 {% endif %}
-</div>
+</main>
 </body>
 </html>

@@ -1,63 +1,76 @@
 {% extends "base.html" %}
-{% block title %}{{ camp.name }} · Driver Outreach{% endblock %}
+{% block title %}{{ camp.name }} · Wayflix Trucking Email Sender{% endblock %}
 {% block content %}
-<div class="row-between">
-  <h1>{{ camp.name or ('Campaign ' ~ camp.id) }}</h1>
-  <span class="status {{ camp.status }}" id="st-status">{{ camp.status }}</span>
+<div class="page-head">
+  <div>
+    <h1>{{ camp.name or ('Campaign ' ~ camp.id) }}</h1>
+    <p class="sub">{{ camp.original_name }}{% if camp.started_at %}<span class="sep">·</span>started {{ fmt_ct(camp.started_at) }}{% endif %}{% if camp.dry_run %}<span class="sep">·</span><span class="tag">dry run</span>{% endif %}</p>
+  </div>
+  <a class="button" href="/campaigns/{{ camp.id }}/log.csv">Download report (CSV)</a>
 </div>
-<div id="st-reason" class="alert amber" hidden></div>
-<div id="st-red"></div>
 
-<div class="road" aria-live="polite">
+<section class="st-banner grey" id="st-banner" aria-labelledby="st-title">
+  <div>
+    <h2 id="st-title"><span class="status {{ camp.status }}" id="st-status">{{ status_label }}</span> <span id="st-head">Loading…</span></h2>
+    <p id="st-text"></p>
+    <p id="st-window" class="small-text"></p>
+  </div>
+  <div class="st-actions">
+    <form method="post" action="/campaigns/{{ camp.id }}/resume" id="f-resume" hidden><button class="primary">Resume sending</button></form>
+    <form method="post" action="/campaigns/{{ camp.id }}/pause" id="f-pause" hidden><button>Pause</button></form>
+  </div>
+</section>
+<div id="st-warnings"></div>
+<p id="st-accprob" class="alert red" hidden><span id="st-accprob-text"></span> <a class="button small" href="/accounts">Fix accounts</a></p>
+
+<div class="road">
   <div class="road-bar" role="progressbar" aria-label="Emails sent" aria-valuemin="0" aria-valuemax="100" id="road-bar"><i id="road-fill"></i></div>
   <div class="road-label"><span id="road-text">Loading…</span><span id="st-estimate"></span></div>
 </div>
-<p class="muted small-text" id="st-window"></p>
 
 <div class="counters">
   <div><span id="c-sent">–</span>Sent</div>
-  <div><span id="c-remaining">–</span>Remaining</div>
-  <div><span id="c-replies">–</span>Replies</div>
-  <div><span id="c-bounces">–</span>Bounces</div>
-  <div><span id="c-unsubs">–</span>Unsubscribes</div>
-  <div><span id="c-errors">–</span>Errors</div>
+  <div><span id="c-remaining">–</span>Still to send</div>
+  <div class="good"><span id="c-replies">–</span>Replies</div>
+  <div><span id="c-bounces">–</span>Bounced</div>
+  <div><span id="c-unsubs">–</span>Unsubscribed</div>
+  <div><span id="c-errors">–</span>Failed</div>
 </div>
 
-<div class="controls">
-  <form method="post" action="/campaigns/{{ camp.id }}/pause" id="f-pause" hidden><button>Pause</button></form>
-  <form method="post" action="/campaigns/{{ camp.id }}/resume" id="f-resume" hidden><button class="primary">Resume</button></form>
-  <form method="post" action="/campaigns/{{ camp.id }}/stop" id="f-stop" hidden onsubmit="return confirm('Stop for good? Drivers not yet emailed will not be emailed by this campaign.')"><button class="danger">Stop</button></form>
-  <a class="button" href="/campaigns/{{ camp.id }}/log.csv">Download log (CSV)</a>
-</div>
-
-<section class="card">
-  <h2>Per account</h2>
-  <div class="scroll">
-  <table class="grid" id="acc-table">
-    <thead><tr><th>Account</th><th class="n">Sent here</th><th class="n">Last 24 h / cap</th><th class="n">Replies</th><th class="n">Bounces</th><th class="n">Unsubs</th><th class="n">Errors</th><th>State</th></tr></thead>
+<section class="card" aria-labelledby="acc-h">
+  <h2 id="acc-h">Gmail accounts in this campaign</h2>
+  <table class="grid stack" id="acc-table">
+    <thead><tr><th>Account</th><th>State</th><th class="n">Sent here</th><th class="n">Last 24 h</th><th class="n hide-sm">Replies</th><th class="n hide-sm">Bounced</th><th class="n hide-sm">Unsub.</th><th class="n hide-sm">Failed</th></tr></thead>
     <tbody></tbody>
   </table>
-  </div>
 </section>
 
-<section class="card">
-  <h2>Notes in the list</h2>
-  <p id="marks-info" class="muted"></p>
+<section class="card" id="notes" aria-labelledby="notes-h">
+  <h2 id="notes-h">Results in your list (NOTES column)</h2>
+  <p id="marks-info"></p>
   {% if camp.source_type != 'gsheet' %}
+  <p class="muted small-text">Results are kept safely on the server. To get them into your Excel/CSV file:</p>
   <div class="controls">
-    <button id="save-file" class="primary" hidden>Save notes into the Excel file</button>
-    <a class="button" href="/campaigns/{{ camp.id }}/download">Download marked copy</a>
+    <a class="button primary" href="/campaigns/{{ camp.id }}/download">Download the list with results</a>
+    <button id="save-file" hidden>Save into my original file</button>
   </div>
-  <p id="save-out" role="status"></p>
+  <p id="save-out" role="status" class="small-text"></p>
   {% else %}
-  <p class="muted">Notes are written into the Google Sheet automatically, in small batches.</p>
+  <p class="muted small-text">Results are written into the Google Sheet automatically, a few at a time.</p>
   {% endif %}
   <div id="unmatched"></div>
 </section>
 
-<section class="card">
-  <h2>Recent alerts</h2>
-  <div id="st-alerts" class="muted">None.</div>
-</section>
+<details class="activity" id="activity">
+  <summary>Activity <span id="act-count"></span></summary>
+  <ul id="st-alerts"><li class="muted">Nothing yet.</li></ul>
+</details>
+
+<div class="danger-zone" id="f-stop-wrap" hidden>
+  <form method="post" action="/campaigns/{{ camp.id }}/stop" id="f-stop" onsubmit="return confirm('Stop this campaign for good?\n\nDrivers not yet emailed will NOT be emailed by this campaign. This cannot be undone (Pause can).')">
+    <button class="danger">Stop campaign for good…</button>
+    <span class="muted small-text">Use Pause if you might continue later.</span>
+  </form>
+</div>
 {% endblock %}
 {% block scripts %}<script>initProgress({{ camp.id }}, "{{ camp.source_type }}", {{ camp.original_name|tojson }});</script>{% endblock %}

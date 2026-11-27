@@ -1,155 +1,102 @@
 {% extends "base.html" %}
-{% block title %}Settings · Driver Outreach{% endblock %}
+{% block title %}Settings · Wayflix Trucking Email Sender{% endblock %}
 {% block content %}
-<h1>Settings</h1>
+<div class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p class="sub">Rules for every campaign. The defaults are safe; most teams never change them.</p>
+  </div>
+</div>
 <nav class="settings-nav" aria-label="Settings sections">
-  <a href="#accounts">Gmail accounts</a><a href="#window">Sending window</a><a href="#caps">Daily caps</a>
-  <a href="#repeat">Repeat emails</a><a href="#test-inbox">Test address</a><a href="#suppression">Do-not-email list</a><a href="#sheets">Google Sheets</a>
+  <a href="#rules">Sending rules</a><a href="#test-inbox">Test address</a><a href="#suppression">Do-not-email list</a><a href="#sheets">Google Sheets</a>
+  <a href="/accounts">Gmail accounts →</a>
 </nav>
 
-<section class="card" id="accounts">
-  <h2>Gmail accounts</h2>
-  <p class="muted">Each account needs 2-Step Verification and an App Password (README part 6). The password is tested, then stored encrypted.</p>
-
-  <div class="account-list">
-  {% for a in accounts %}
-  <div class="account {{ 'blocked' if a.state in ('no_name', 'disabled') }}">
-    <div>
-      <div class="account-email">{{ a.email }}</div>
-      <div class="account-facts">
-        <span>Week <b>{{ a.week }}</b> in the tool</span>
-        <span>Sent last 24 h: <b>{{ a.sent_24h }}</b></span>
-        <span>Daily cap: <b>{{ a.cap }}</b>{% if a.cap_override %} <span class="tag">custom</span>{% endif %}</span>
+<section class="card" id="rules" aria-labelledby="rules-h">
+  <h2 id="rules-h">Sending rules</h2>
+  <form method="post" action="/settings/rules">
+    <div class="rule-group" role="group" aria-labelledby="rg1">
+      <h3 id="rg1">When emails go out</h3>
+      <p class="muted small-text">US Central time. Outside these days and hours, campaigns wait and continue by themselves.</p>
+      <div class="days" role="group" aria-label="Sending days">
+        {% for d in day_names %}<label class="day"><input type="checkbox" name="days" value="{{ loop.index0 }}" {% if loop.index0 in window.days %}checked{% endif %}> {{ d }}</label>{% endfor %}
       </div>
-      <form method="post" action="/settings/accounts/{{ a.id }}/name" class="sender-name">
-        <label>Sender name (shown in the inbox)
-          <input name="display_name" value="{{ a.display_name }}" placeholder="Mike - ABC Logistics" maxlength="80"
-                 class="{{ 'missing' if not a.display_name }}"></label>
-        <button class="small">Save</button>
-      </form>
-      {% if not a.display_name %}<div class="bad-text small-text" style="margin-top:4px">This account can't send until it has a sender name.</div>{% endif %}
+      <div class="time-fields">
+        <label>From <input type="time" name="start" value="{{ window.start }}" required></label>
+        <label>To <input type="time" name="end" value="{{ window.end }}" required></label>
+      </div>
+      <p class="small-text">Today that is <b>{{ tashkent }}</b> Tashkent time (it shifts by one hour when the US changes clocks).</p>
     </div>
-    <div>
-      {% if a.state == 'ok' %}<span class="status running">Ready</span>
-      {% elif a.state == 'paused' %}<span class="status paused">Resting</span><span class="status-note">until {{ a.paused_until_ct }}</span>
-      {% elif a.state == 'no_name' %}<span class="status stopped">Blocked</span><span class="status-note">No sender name</span>
-      {% else %}<span class="status stopped">Stopped</span><span class="status-note">{{ a.disabled_reason }}</span>{% endif %}
-    </div>
-    <div class="actions">
-      <button type="button" class="small" data-test-account="{{ a.id }}">Test connection</button>
-      {% if a.state in ('paused', 'disabled') %}
-      <form method="post" action="/settings/accounts/{{ a.id }}/reenable" class="inline"><button class="small">Re-enable</button></form>
-      {% endif %}
-      <details class="inline-details"><summary class="small">New App Password</summary>
-        <form method="post" action="/settings/accounts/{{ a.id }}/password">
-          <input name="app_password" type="password" placeholder="16 letters" required autocomplete="new-password" aria-label="New App Password">
-          <button class="small">Save and test</button>
-        </form>
+
+    <div class="rule-group" role="group" aria-labelledby="rg2">
+      <h3 id="rg2">How many emails per account per day</h3>
+      <p class="muted small-text">Counted over the last 24 hours. New accounts start low and grow each week, which keeps Gmail from locking them. Above {{ risky }} a day is risky for a free Gmail; the maximum is {{ hard_max }}.</p>
+      <div class="caps-grid">
+        {% for w in warmup %}<label>{{ 'Week ' ~ loop.index ~ ('+' if loop.last else '') }}
+          <input type="number" class="cap" name="w{{ loop.index0 }}" min="1" max="{{ hard_max }}" value="{{ w }}" required></label>{% endfor %}
+      </div>
+      {% if accounts %}
+      <details class="inline-details" {% if accounts|selectattr('cap_override')|list %}open{% endif %}>
+        <summary>Custom limit for one account</summary>
+        <p class="muted small-text">Leave empty to follow the weekly warm-up above.</p>
+        <div class="custom-caps">
+          {% for a in accounts %}<label>{{ a.display_name or a.email }} <span class="hint">{{ a.email }}</span>
+            <input type="number" class="cap" name="cap_{{ a.id }}" min="1" max="{{ hard_max }}" value="{{ a.cap_override or '' }}" placeholder="{{ a.warmup_cap }} (warm-up)"></label>{% endfor %}
+        </div>
       </details>
-      <form method="post" action="/settings/accounts/{{ a.id }}/delete" class="inline" onsubmit="return confirm('Remove {{ a.email }}? It stops sending right away.')"><button class="small danger">Remove</button></form>
-      <div class="test-result" id="test-{{ a.id }}" role="status"></div>
+      {% endif %}
+      <div class="cap-warning alert red" data-risky="{{ risky }}" hidden>A limit above {{ risky }} a day is a high risk of Gmail locking a free account.</div>
     </div>
-  </div>
-  {% else %}
-  <p class="muted">No accounts yet. Add the first one below.</p>
-  {% endfor %}
-  </div>
 
-  <h3 class="subhead">Add an account</h3>
-  <form method="post" action="/settings/accounts/add" class="form-row">
-    <label>Gmail address <input name="email" type="email" placeholder="name@gmail.com" required></label>
-    <label>Sender name (shown in the inbox) <input name="display_name" placeholder="Mike - ABC Logistics" maxlength="80"></label>
-    <label>App Password <input name="app_password" type="password" placeholder="xxxx xxxx xxxx xxxx" required autocomplete="new-password"></label>
-    <button class="primary" data-busy="Testing…">Add and test</button>
-    {% if dry_run %}<label class="check" style="flex-basis:100%"><input type="checkbox" name="skip_test" value="1"> Skip the connection test (dry run only)</label>{% endif %}
-  </form>
-  <p class="tip small-text">Use a real person's name as the sender name, e.g. <b>Mike - ABC Logistics</b>. An account without a sender name doesn't send.</p>
-</section>
+    <div class="rule-group" role="group" aria-labelledby="rg3">
+      <h3 id="rg3">Don't email the same driver again too soon</h3>
+      <label class="narrow-field">Skip drivers emailed by any campaign in the last
+        <span class="with-unit"><input type="number" name="recent_days" min="0" max="365" value="{{ recent_days }}" required> days</span>
+        <span class="hint">Their row gets the note “Not sent - emailed in last {{ recent_days or 'N' }} days”. 0 turns this off. Dry runs never count.</span></label>
+    </div>
 
-<section class="card" id="window">
-  <h2>Sending window</h2>
-  <p class="muted">Emails go out only on these days and hours, US Central time.</p>
-  <form method="post" action="/settings/window">
-    <div class="days">
-      {% for d in day_names %}<label class="day"><input type="checkbox" name="days" value="{{ loop.index0 }}" {% if loop.index0 in window.days %}checked{% endif %}> {{ d }}</label>{% endfor %}
-    </div>
-    <div class="time-fields">
-      <label>From <input type="time" name="start" value="{{ window.start }}"></label>
-      <label>To <input type="time" name="end" value="{{ window.end }}"></label>
-      <button class="primary" style="margin:10px 0">Save window</button>
-    </div>
-  </form>
-  <p>That is <b>{{ tashkent }}</b> Tashkent time today. Tashkent time shifts by one hour when the US changes clocks.</p>
-</section>
-
-<section class="card" id="caps">
-  <h2>Daily caps and warm-up</h2>
-  <p class="muted">Counted over a rolling 24 hours per account. New accounts start low and grow each week. Above {{ risky }} a day, a free Gmail account is at high risk of being locked. Maximum {{ hard_max }}.</p>
-  <form method="post" action="/settings/caps">
-    <div class="caps-grid">
-      {% for w in warmup %}<label>{{ 'Week ' ~ loop.index ~ ('+' if loop.last else '') }}
-        <input type="number" class="cap" name="w{{ loop.index0 }}" min="1" max="{{ hard_max }}" value="{{ w }}"></label>{% endfor %}
-    </div>
-    {% if accounts %}
-    <h3 class="subhead">Custom cap per account</h3>
-    <p class="muted small-text">Leave empty to follow the warm-up.</p>
-    <div class="scroll">
-    <table class="grid compact">
-      {% for a in accounts %}<tr><td style="vertical-align:middle"><label for="cap_{{ a.id }}" style="margin:0;font-weight:400">{{ a.email }}</label></td>
-        <td style="width:150px"><input type="number" class="cap" id="cap_{{ a.id }}" name="cap_{{ a.id }}" min="1" max="{{ hard_max }}" value="{{ a.cap_override or '' }}" placeholder="{{ a.warmup_cap }}" style="margin:0"></td></tr>{% endfor %}
-    </table>
-    </div>
-    {% endif %}
-    <div class="cap-warning alert red" data-risky="{{ risky }}" hidden>A cap above {{ risky }} a day is a high risk of account lock on a free Gmail.</div>
-    <button class="primary" style="margin-top:12px">Save caps</button>
+    <div class="controls"><button class="primary">Save sending rules</button></div>
   </form>
 </section>
 
-<section class="card" id="repeat">
-  <h2>Repeat emails</h2>
-  <p class="muted">Skip drivers that any campaign emailed in the last few days, even if they're on a new list. Their row gets the note “Not sent - emailed in last {{ recent_days or 'N' }} days”. Dry runs never block live sending.</p>
-  <form method="post" action="/settings/recent-days" class="form-row">
-    <label style="flex:0 1 220px">Days <span class="hint">0 turns the check off.</span>
-      <input type="number" name="recent_days" min="0" max="365" value="{{ recent_days }}" required></label>
-    <button>Save days</button>
-  </form>
-</section>
-
-<section class="card" id="test-inbox">
-  <h2>Test address</h2>
-  <p class="muted">Where “Send test” emails go before you start a campaign.</p>
-  <form method="post" action="/settings/test-inbox" class="form-row">
-    <label>Your email <input name="test_inbox" type="email" value="{{ test_inbox }}"></label>
+<section class="card" id="test-inbox" aria-labelledby="test-h">
+  <h2 id="test-h">Test address</h2>
+  <p class="muted">Your own inbox. “Send test” on the last campaign step sends the real email here, so you see exactly what drivers get.</p>
+  <form method="post" action="/settings/test-inbox" class="field-row">
+    <input name="test_inbox" type="email" value="{{ test_inbox }}" placeholder="you@company.com" aria-label="Test address">
     <button>Save address</button>
   </form>
 </section>
 
-<section class="card" id="suppression">
-  <h2>Do-not-email list</h2>
-  <p class="muted">Checked before every email, across all campaigns. Unsubscribes, bounces and replies are added automatically.</p>
+<section class="card" id="suppression" aria-labelledby="supp-h">
+  <h2 id="supp-h">Do-not-email list</h2>
+  <p class="muted">Checked before every email, in every campaign. Drivers who unsubscribe, bounce or reply are added automatically.</p>
   <p>
-    {% for s in suppressed %}<span class="tag">{{ s.reason }}: {{ s.n }}</span> {% else %}<span class="muted">The list is empty.</span>{% endfor %}
+    {% set reason_names = {'unsubscribed': 'Unsubscribed', 'bounced': 'Bounced', 'replied': 'Replied', 'manual': 'Added by hand'} %}
+    {% for s in suppressed %}<span class="tag">{{ reason_names.get(s.reason, s.reason) }}: {{ s.n }}</span> {% else %}<span class="muted">Empty so far.</span>{% endfor %}
   </p>
   <div class="suppress-tools">
     <form method="post" action="/settings/suppression/add">
-      <label>Add one address <input name="email" type="email" required placeholder="driver@example.com"></label>
-      <button>Add</button>
+      <label>Add one address <span class="field-row"><input name="email" type="email" required placeholder="driver@example.com"><button>Add</button></span></label>
     </form>
     <form method="post" action="/settings/suppression/import" enctype="multipart/form-data">
-      <label>Import a CSV <span class="hint">Email addresses in the first column.</span><input type="file" name="file" accept=".csv" required></label>
-      <button>Import</button>
+      <label>Import a CSV file <span class="hint">Email addresses in the first column.</span>
+        <span class="field-row"><input type="file" name="file" accept=".csv" required><button>Import</button></span></label>
     </form>
   </div>
-  <p style="margin-top:14px"><a class="button" href="/settings/suppression.csv">Export the list (CSV)</a></p>
+  <p><a class="button" href="/settings/suppression.csv">Download the list (CSV)</a></p>
 </section>
 
-<section class="card" id="sheets">
-  <h2>Google Sheets</h2>
+<section class="card" id="sheets" aria-labelledby="sheets-h">
+  <h2 id="sheets-h">Google Sheets</h2>
   {% if sa_email %}
-  <p>To use a Google Sheet, click <b>Share</b> in the sheet and add this address as <b>Editor</b>:</p>
-  <p><code class="copy">{{ sa_email }}</code> <button type="button" class="small" data-copy="{{ sa_email }}">Copy</button></p>
+  <p>To use a Google Sheet as a driver list, open the sheet, click <b>Share</b>, and add this address as <b>Editor</b>:</p>
+  <p class="copy-row"><code class="copy">{{ sa_email }}</code> <button type="button" class="small" data-copy="{{ sa_email }}">Copy</button></p>
+  <p class="muted small-text">Untick “Notify people” when sharing. The tool writes results into the sheet's NOTES column by itself.</p>
   {% else %}
-  <p class="muted">Not set up yet. Follow README part 7 to create the service account, then put its key file on the server.</p>
+  <p>Not connected. Excel and CSV files work without it.</p>
+  <p class="muted small-text">Connecting needs a one-time setup on the server by whoever installed the tool (README part 7, “Google Sheets: create the service account”). After that, this box shows the address to share your sheets with.</p>
   {% endif %}
 </section>
 {% endblock %}
+{% block scripts %}<script>if (location.hash === "#accounts") location.replace("/accounts");</script>{% endblock %}
