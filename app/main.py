@@ -739,19 +739,34 @@ def stop(cid: int):
     return redirect(f"/campaigns/{cid}")
 
 
+def _log_status(r) -> str:
+    """One readable status per row; the latest outcome wins (unsubscribed > replied > bounced > sent)."""
+    d = timeutil.us_date
+    if r["unsubscribed_at"]:
+        return f"Unsubscribed {d(r['unsubscribed_at'])}"
+    if r["replied_at"]:
+        return f"Replied {d(r['replied_at'])}"
+    if r["bounced_at"]:
+        return f"Bounced {d(r['bounced_at'])}"
+    if r["status"] == "sent":
+        return f"Sent {d(r['sent_at'])}" if r["sent_at"] else "Sent"
+    if r["status"] == "skipped":
+        return f"Not sent - {SKIP_LABELS.get(r['skip_reason'], r['skip_reason'] or 'skipped')}"
+    if r["status"] == "failed":
+        return f"Failed - {r['error']}" if r["error"] else "Failed"
+    if r["status"] == "sending":
+        return "Sending"
+    return "Waiting"
+
+
 @app.get("/campaigns/{cid}/log.csv")
 def log_csv(cid: int):
     c = conn()
-    accs = {a["id"]: a["email"] for a in c.execute("SELECT id,email FROM accounts")}
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["row", "email", "name", "status", "skip reason", "sent from", "sent at (CT)", "bounced", "replied",
-                "unsubscribed", "error"])
+    w.writerow(["row", "email", "name", "status"])
     for r in c.execute("SELECT * FROM recipients WHERE campaign_id=? ORDER BY row_num", (cid,)):
-        w.writerow([r["row_num"], r["email"] or r["raw_email"], r["name"], r["status"],
-                    SKIP_LABELS.get(r["skip_reason"], r["skip_reason"] or ""), accs.get(r["account_id"], ""),
-                    timeutil.fmt_central(r["sent_at"]), timeutil.fmt_central(r["bounced_at"]),
-                    timeutil.fmt_central(r["replied_at"]), timeutil.fmt_central(r["unsubscribed_at"]), r["error"] or ""])
+        w.writerow([r["row_num"], r["email"] or r["raw_email"], r["name"], _log_status(r)])
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="campaign-{cid}-log.csv"'})
 
