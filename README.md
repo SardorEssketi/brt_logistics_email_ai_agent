@@ -1,4 +1,4 @@
-# Driver Outreach
+# Wayflix Trucking Email Sender
 
 A small private website that sends **one recruiting email per driver** from 2–3 Gmail accounts, slowly and safely, and writes the result into the **NOTES** column of your driver list (Excel, CSV or Google Sheet).
 
@@ -111,7 +111,7 @@ Do this **for each** Gmail account (use dedicated accounts, not anyone's main in
 1. Sign in to the Gmail account in a browser and open **https://myaccount.google.com/security**.
 2. Under **How you sign in to Google**, click **2-Step Verification** → **Turn on**. Add a phone number and confirm the code.
 3. Open **https://myaccount.google.com/apppasswords** (you may need to sign in again).
-4. In **App name** type `Driver Outreach` → **Create**.
+4. In **App name** type `Wayflix Trucking Email Sender` → **Create**.
 5. A yellow box shows a **16-letter password** like `abcd efgh ijkl mnop`. Copy it now (Google shows it only once).
 6. In the tool: **Settings → Gmail accounts** → enter the Gmail address, the **Sender name (shown in the inbox)**, and paste the App Password → **Add & test**. The tool checks sending (SMTP) and inbox reading (IMAP) before saving.
    - Use a real person's name for the sender name, e.g. `Mike - ABC Logistics`. You can change it later in the account's row. **An account without a sender name doesn't send** (the other accounts continue); Settings and the progress page say so in red.

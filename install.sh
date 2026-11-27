@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Driver Outreach — one-command install / update for Ubuntu 22.04 / 24.04 (Oracle Cloud Always Free VM).
+# Wayflix Trucking Email Sender — one-command install / update for Ubuntu 22.04 / 24.04 (Oracle Cloud Always Free VM).
 #
 #   sudo ./install.sh
 #
@@ -97,7 +97,7 @@ if [ ! -f "$ENV_FILE" ]; then
   FERNET_KEY=$("$APP_DIR/venv/bin/python" -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
   umask 077
   cat > "$ENV_FILE" <<EOF
-# Driver Outreach secrets. Keep private. Created $(date -u +%F).
+# Wayflix Trucking Email Sender secrets. Keep private. Created $(date -u +%F).
 PUBLIC_BASE_URL=https://$DOMAIN
 ADMIN_USER=$ADMIN_USER
 ADMIN_PASSWORD_HASH=$HASH
@@ -142,7 +142,7 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
 say "Hardening SSH and switching off unused services"
 # Key-only SSH as 'ubuntu'; no root login, no X11. 01- sorts before cloud-init's files, and sshd uses the first value.
 HARDEN=/etc/ssh/sshd_config.d/01-driver-outreach.conf
-printf '%s\n' "# Added by Driver Outreach install.sh" "PermitRootLogin no" "PasswordAuthentication no" \
+printf '%s\n' "# Added by Wayflix Trucking Email Sender install.sh" "PermitRootLogin no" "PasswordAuthentication no" \
   "KbdInteractiveAuthentication no" "X11Forwarding no" > "$HARDEN"
 chmod 644 "$HARDEN"
 if sshd -t 2>/dev/null; then

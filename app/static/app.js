@@ -1,4 +1,4 @@
-// Small vanilla JS for the Driver Outreach UI.
+// Small vanilla JS for the Wayflix Trucking Email Sender UI.
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);

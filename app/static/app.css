@@ -1,4 +1,4 @@
-/* Driver Outreach — visual language borrowed from US highway signage:
+/* Wayflix Trucking Email Sender — visual language borrowed from US highway signage:
    guide-sign green for the header, Interstate-shield blue for actions, warning-sign yellow for caution.
    Overpass is an open-source cut of the Highway Gothic sign lettering (OFL), bundled in /static/fonts. */
 @font-face {
@@ -55,7 +55,9 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: .92em; }
   max-width: 1150px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center;
   gap: 8px 16px; flex-wrap: wrap; padding: 8px 12px; border: 2px solid rgba(255, 255, 255, .9); border-radius: 7px;
 }
-.top .brand { color: #fff; font-weight: 800; font-size: 19px; letter-spacing: .01em; text-decoration: none; line-height: 1; padding-top: 3px; }
+.top .brand { color: #fff; font-weight: 800; font-size: 19px; letter-spacing: .01em; text-decoration: none; line-height: 1; display: inline-flex; align-items: center; gap: 10px; }
+.top .brand span { padding-top: 3px; }
+.truck-icon { width: 1.75em; height: auto; flex: none; display: block; }
 .top nav { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 18px; }
 .top nav a, .top nav .link { color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; padding: 4px 0 2px; border-bottom: 3px solid transparent; }
 .top nav a:hover, .top nav .link:hover { border-bottom-color: rgba(255, 255, 255, .5); color: #fff; }
@@ -69,7 +71,8 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: .92em; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin: 14px 0; }
 .card.narrow { width: 100%; max-width: 400px; }
 .login-sign { display: inline-block; background: var(--sign); color: #fff; padding: 5px; border-radius: 9px; }
-.login-sign span { display: block; border: 2px solid #fff; border-radius: 6px; padding: 10px 18px 7px; font-weight: 800; font-size: 22px; line-height: 1; }
+.login-sign span { display: flex; align-items: center; gap: 12px; border: 2px solid #fff; border-radius: 6px; padding: 10px 18px 7px; font-weight: 800; font-size: 22px; line-height: 1; }
+.login-sign .truck-icon { margin-top: -3px; }  /* the font sits low (padding-top above); keep the truck optically centred */
 
 /* ---------- Forms ---------- */
 label { display: block; margin: 10px 0; font-weight: 600; font-size: 14px; }

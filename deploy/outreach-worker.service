@@ -1,5 +1,5 @@
 [Unit]
-Description=Driver Outreach - background sender, inbox watcher, notes writer
+Description=Wayflix Trucking Email Sender - background sender, inbox watcher, notes writer
 After=network-online.target
 Wants=network-online.target
 
