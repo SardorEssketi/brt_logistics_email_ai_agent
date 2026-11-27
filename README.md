@@ -113,12 +113,12 @@ Do this **for each** Gmail account (use dedicated accounts, not anyone's main in
 3. Open **https://myaccount.google.com/apppasswords** (you may need to sign in again).
 4. In **App name** type `Wayflix Trucking Email Sender` → **Create**.
 5. A yellow box shows a **16-letter password** like `abcd efgh ijkl mnop`. Copy it now (Google shows it only once).
-6. In the tool: **Settings → Gmail accounts** → enter the Gmail address, the **Sender name (shown in the inbox)**, and paste the App Password → **Add & test**. The tool checks sending (SMTP) and inbox reading (IMAP) before saving.
-   - Use a real person's name for the sender name, e.g. `Mike - ABC Logistics`. You can change it later in the account's row. **An account without a sender name doesn't send** (the other accounts continue); Settings and the progress page say so in red.
+6. In the tool: **Gmail accounts** (top menu) → under **Add your first Gmail account** / **Add another account**, enter the Gmail address, the **Sender name**, and paste the App Password → **Add and test**. The tool checks that it can send and read replies before saving. (These steps are also on that page under **How to get an App Password**.)
+   - Use a real person's name for the sender name, e.g. `Mike - ABC Logistics`. You can change it later on the account's card (**Save name**). **An account without a sender name doesn't send** (the other accounts continue); its card says **Needs sender name** and the Campaigns page lists it under **Needs your attention**.
 
 Notes:
 
-- If you change the Google password of that account, Google cancels its App Passwords. The tool stops that account and shows a red alert. Create a new App Password and use **New App Password** in Settings.
+- If you change the Google password of that account, Google cancels its App Passwords. The tool stops that account: its card shows **Stopped** with the steps to fix it, and the Campaigns page shows **Fix account**. Create a new App Password and paste it under **New App Password** on the account's card.
 - "App passwords" page missing? 2-Step Verification isn't on yet, or the account uses Advanced Protection.
 
 ## 7. Google Sheets: create the service account
@@ -141,39 +141,53 @@ This gives the tool its own Google "robot" email address. You share a sheet with
    sudo chmod 640 /etc/driver-outreach/google-service-account.json
    sudo systemctl restart outreach-web outreach-worker
    ```
-7. **Settings → Google Sheets** in the tool now shows the robot's email. For each driver sheet: **Share** → paste that email → role **Editor** → untick "Notify people" → **Share**.
+7. **Settings → Google Sheets** in the tool now shows the robot's email (with a **Copy** button). For each driver sheet: **Share** → paste that email → role **Editor** → untick "Notify people" → **Share**.
 
 Keep the JSON file private. Anyone who has it can edit the sheets shared with it.
 
 ## 8. First login and Settings
 
-Open your `https://…duckdns.org` address and log in. Then in **Settings**:
+Open your `https://…duckdns.org` address and log in. The top menu has three pages: **Campaigns**, **Gmail accounts** and **Settings**.
 
-1. **Gmail accounts**: add 2–3 (step 6), each with its sender name.
-2. **Sending window**: default Mon–Fri 9:00–16:00 Central. The matching Tashkent time is shown underneath.
-3. **Daily caps**: default warm-up is 20 → 40 → 60 → 80 per account per day (weeks 1, 2, 3, 4+), counted over a rolling 24 hours. Keep them. Above 100/day a free Gmail is likely to be locked.
-4. **Repeat emails**: default 60 days. A driver that any campaign emailed in that time is skipped, even on a new list, and the row gets "Not sent - emailed in last 60 days". 0 turns the check off. Dry runs never count.
-5. **"Send test to myself" address**: your own inbox.
+Until an account can send, the Campaigns page shows a **Get ready to send** checklist:
+
+1. **Gmail accounts**: add 2–3 (step 6), each with its sender name. This is the only required step.
+2. **Test address** (Settings): your own inbox, used by **Send test**.
+3. **Google Sheets** (Settings): only if your lists are Google Sheets (step 7).
+
+**Settings → Sending rules** is one form with one **Save sending rules** button (if one value is wrong, nothing is saved and the page says which):
+
+- **When emails go out**: default Mon–Fri 9:00 AM–4:00 PM Central. The matching Tashkent time is shown underneath.
+- **How many emails per account per day**: default warm-up is 20 → 40 → 60 → 80 per account per day (weeks 1, 2, 3, 4+), counted over a rolling 24 hours. Keep them. Above 100/day a free Gmail is likely to be locked. **Custom limit for one account** overrides the warm-up for that account.
+- **Don't email the same driver again too soon**: default 60 days. A driver that any campaign emailed in that time is skipped, even on a new list, and the row gets "Not sent - emailed in last 60 days". 0 turns the check off. Dry runs never count.
+
+Settings also holds the **Do-not-email list** (add one address, import a CSV, download the list).
+
+**When something needs you**, the Campaigns page shows it under **Needs your attention** with a button that goes straight to the fix (**Fix account**, **Add sender name**, **Review and resume**). Items disappear by themselves once fixed. The full history is under **Recent activity** (collapsed), with **Clear all**.
 
 Dry runs (`DRY_RUN=1`) never use up an account's real daily cap. The unsubscribe link in each email opens a page with a **Confirm unsubscribe** button (so mail scanners that open links don't unsubscribe anyone); Gmail's own one-click unsubscribe works directly.
 
 ## 9. Sending a campaign
 
-1. **New campaign** → choose an **Excel/CSV file** or paste a **Google Sheets link**.
+1. **Campaigns → New campaign** → **Choose file…** (Excel/CSV) or paste a **Google Sheets link**. The campaign name is optional.
    - In **Chrome or Edge** the file picker asks for permission to **edit** the file. Allow it: then the tool can write the NOTES back into your original file on your computer.
-2. **Columns**: the tool finds the header row (first 10 rows) and the columns (Name / Full Name / Driver Name, First + Last Name, Email / E-mail, Phone, Position / Driver Type, Notes / Comments). Check them. Anything it couldn't find is shown in red with **Please choose**. If there is no NOTES column, it says where it will add one (the first completely empty column to the right of your data; no other column is touched).
-   - **Skip drivers whose NOTES already say Sent** is ticked by default. Untick it to email them again (unsubscribed/bounced/replied drivers are always skipped).
-3. **Message**: subject + plain text. Paste the **whole** message, including your signature, company name, MC/DOT and phone: the tool adds nothing except the unsubscribe line. If the text has no postal address (street number + state/ZIP), a yellow note reminds you that US law (CAN-SPAM) may require one in a commercial email; you can still send. Click a placeholder to insert it: `{first_name}` (empty → "there", so "Hi {first_name}," becomes "Hi there,"), `{name}`, `{last_name}`, `{position}`. The **Content check** box updates as you type: yellow = advice, red = must fix (for example, a subject starting with "Re:"/"Fwd:" is not allowed).
-4. **Check & start**: summary (rows, duplicates, invalid, already unsubscribed/bounced, already Sent, **will send**, estimated finish date), suggested fixes for typos like `gmial.com`, a preview of 3 random drivers exactly as they will get it, and **Send test to myself**. Then **Start sending**.
-5. **Progress page**: live counters, per-account numbers, **Pause / Resume / Stop**, **Download log (CSV)**.
-   - Excel/CSV lists: **Save marks to Excel file** writes the notes into your original file (it also saves automatically every 3 minutes while the page is open). If the file is open in Excel, close it and click again. **Download marked copy** always works, in any browser.
+2. **Columns**: the tool finds the row with the column titles (first 10 rows) and the columns (Name / Full Name / Driver Name, First + Last Name, Email / E-mail, Phone, Position / Driver Type, Notes / Comments). **Needed** (Email and Name) are at the top, **Optional** below; check them. Anything it couldn't find is shown in red with **Choose a column…**. If there is no NOTES column, it says where it will add one (the first completely empty column to the right of your data; no other column is touched).
+   - **Skip drivers whose NOTES already say “Sent”** is ticked by default. Untick it to email them again (unsubscribed/bounced/replied drivers are always skipped).
+3. **Message**: subject + plain text. Paste the **whole** message, including your signature, company name, MC/DOT and phone: the tool adds nothing except the unsubscribe line. If the text has no postal address (street number + state/ZIP), a yellow note reminds you that US law (CAN-SPAM) may require one in a commercial email; you can still send. Click a placeholder under the message to insert it: `{first_name}` (empty → "there", so "Hi {first_name}," becomes "Hi there,"), `{name}`, `{last_name}`, `{position}`. The **Preview** on the right shows, as you type, exactly what the first driver on the list will get. The **Content check** box updates too: yellow = advice, red = must fix (for example, a subject starting with "Re:"/"Fwd:" is not allowed). Then **Save and continue**. (If you leave the page with unsaved text, the browser asks first.)
+4. **Check & start** goes top to bottom:
+   1. **Who gets the email**: how many drivers will get it; **… rows are skipped — see why** lists duplicates, invalid, already unsubscribed/bounced, already Sent, and so on. Suggested fixes for typos like `gmial.com` → **Use the corrected addresses**.
+   2. **Read the email as a driver sees it**: one random driver at a time (**Show another driver**).
+   3. **Send a test to yourself** (recommended).
+   4. **Start**: one sentence says what will happen (how many drivers, which hours, expected finish). Then **Start sending to N drivers**.
+5. **Progress page**: a status box at the top says what is happening in one sentence (**Sending now**, **Waiting for the sending window** with the next start time, **Paused automatically** with the reason, **Finished**) and has the button you need (**Pause** / **Resume sending**). Below: counters, each Gmail account's state, and **Download report (CSV)** (one row per driver with its result). **Stop campaign for good…** is at the bottom; it can't be undone, so use **Pause** if you might continue.
+   - Excel/CSV lists, under **Results in your list**: **Download the list with results** always works, in any browser. In Chrome/Edge, **Save into my original file** writes the notes into your original file (it also saves automatically every 3 minutes while the page is open). If the file is open in Excel, close it and click again.
    - Google Sheets: notes are written automatically in small batches. If someone sorts the sheet during the campaign, rows are found again by email. If a row was deleted, the page lists that note instead of writing it somewhere wrong.
 
 **Automatic safety stops**
 
 - Bounce rate above 3% (after 30+ emails) or unsubscribes above 2% (after 50+) → the campaign pauses and tells you why. Fix the list or message, then press **Resume**.
 - Gmail says "daily limit" → that account rests for 24 hours; the others continue.
-- Gmail refuses the password or flags the account → that account stops immediately (red alert) and is **never** retried automatically. Sign in to that Gmail in a browser, clear any security warning, make a new App Password, then use **New App Password** in Settings.
+- Gmail refuses the password or flags the account → that account stops immediately (**Needs your attention → Fix account**) and is **never** retried automatically. Sign in to that Gmail in a browser, clear any security warning, make a new App Password, then paste it under **New App Password** on the account's card in **Gmail accounts**.
 
 **What the tool deliberately does not do:** no attachments, images, tracking pixels or click tracking; no hidden text or tricks; no fake "Re:/Fwd:" subjects; no follow-up sequences; no buying or scraping lists.
 
@@ -219,11 +233,11 @@ Copy the line it prints, put it after `ADMIN_PASSWORD_HASH=` in `/etc/driver-out
 | Site doesn't open | Check step 3 (ports 80/443) and that DuckDNS shows the server's current IP. `sudo journalctl -u caddy -n 50` shows certificate errors. |
 | "Out of capacity" creating the VM | Try another availability domain, try again later, or use `VM.Standard.E2.1.Micro`. |
 | Add account fails: "Username and Password not accepted" | Use the 16-letter **App Password**, not the normal Gmail password. Check that 2-Step Verification is on. |
-| Add account fails on IMAP | In Gmail: Settings ⚙ → See all settings → Forwarding and POP/IMAP → Enable IMAP (if that option is shown). |
+| Add account fails with "Reading replies from the inbox failed" | In Gmail: Settings ⚙ → See all settings → Forwarding and POP/IMAP → Enable IMAP (if that option is shown). |
 | "The tool can't open this sheet" | Share the sheet with the service-account email as **Editor** (step 7). |
-| Nothing is sending | The progress page says why: outside the sending window, all accounts at their cap, accounts without a sender name, or the campaign is paused. |
+| Nothing is sending | The status box at the top of the progress page says why: waiting for the sending window, accounts resting or stopped, or the campaign is paused. |
 | Emails land in Spam | Shorten the message, use at most one link, avoid ALL CAPS/"!!!", and keep the daily caps low. Replies from drivers help the most. |
-| Notes not appearing in the Sheet | The progress page shows "waiting to be written" and the last error. Notes are kept and retried; nothing is lost. |
+| Notes not appearing in the Sheet | **Results in your list** on the progress page shows how many are waiting and the last problem. Notes are kept and retried; nothing is lost. |
 
 ## 12. For developers
 

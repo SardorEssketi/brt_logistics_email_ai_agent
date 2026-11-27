@@ -79,7 +79,7 @@ Data tables (campaigns, accounts, per-account stats) rely on sideways scrolling,
 
 ### Wizard
 - **Step 1:** warns up front if no account can send yet, with a link.
-- **Step 2:** title row and tab live in the same form, so the column choices are kept. The mapping is split into **Needed** (Email, Name) and **Optional**. "None" becomes "Not in this list".
+- **Step 2:** the mapping is split into **Needed** (Email, Name) and **Optional**, laid out in a grid instead of a long table. Every detected column says "✓ Found automatically", and "None" becomes "Not in this list". The tab and title-row pickers still reload the page: the list of columns depends on which row holds the titles, so the columns are detected again. The picker sits alone at the top, so there is nothing else on the page to lose yet.
 - **Step 3:** **live preview** of the first driver's email next to the editor (rendered by the server, same code as the real email). The browser warns before leaving with unsaved text.
 - **Step 4** is reordered top to bottom as a checklist:
   1. who gets it
